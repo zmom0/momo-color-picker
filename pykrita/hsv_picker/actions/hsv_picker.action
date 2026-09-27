@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ActionCollection version="2" name="Scripts">
+    <Actions category="Scripts">
+        <text>Momo Color Picker</text>
+        <Action name="hsv_picker_popup">
+            <icon></icon>
+            <text>Show Momo Color Picker</text>
+            <whatsThis>Temporarily show the picker; press Shift+B again or click outside to hide</whatsThis>
+            <toolTip>Show Momo Color Picker</toolTip>
+            <iconText>Show Momo Color Picker</iconText>
+            <activationFlags>0</activationFlags>
+            <activationConditions>0</activationConditions>
+            <shortcut>Shift+B</shortcut>
+            <isCheckable>false</isCheckable>
+            <statusTip>Show Momo Color Picker</statusTip>
+        </Action>
+    </Actions>
+</ActionCollection>

@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Build release zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = ""
+          if ("${{ github.ref }}" -like "refs/tags/*") {
+              $version = "${{ github.ref_name }}".TrimStart("v")
+          }
+          if ($version) {
+              python tools/build_release_zip.py --version $version
+          } else {
+              python tools/build_release_zip.py
+          }
+
+      - name: Upload release asset
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          body_path: RELEASE_NOTES.md
