@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=Krita/PythonPlugin
+X-KDE-Library=hsv_picker
+X-Python-2-Compatible=false
+Name=Momo Color Picker
+Name[zh_CN]=馍馍拾色器
+Name[zh_TW]=馍馍拾色器
+Comment=Momo Color Picker: a more HSV-friendly Oklab/Oklch picker for Krita. Hue ring + SV square, L/C/a/b strips, custom keymap and a Shift+B popup.
+Comment[zh_CN]=馍馍拾色器：更适合HSV宝宝的Oklab/Oklch拾色器。色相环 + SV 方块、L/C/a/b 色条、自定义按键、Shift+B 弹窗。
+Comment[zh_TW]=饃饃拾色器：更適合HSV寶寶的Oklab/Oklch拾色器。色相環 + SV 方塊、L/C/a/b 色條、自訂按鍵、Shift+B 彈窗。
+X-Krita-Manual=Manual.html

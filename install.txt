@@ -1,0 +1,41 @@
+﻿Momo Color Picker — installation guide (v1.0.0)
+================================================================
+
+Compatibility
+  Krita 5.3.x on 64-bit Windows. The embedded Python 3.13 has no numpy;
+  this package already bundles numpy 2.3.0, so no separate Python or numpy
+  installation is required. Krita 5.2 and older are not tested.
+
+Installation
+  1. Unzip the whole folder to any location (paths with non-ASCII characters
+     are fine).
+  2. Double-click install.bat. If your antivirus asks, allow it: the script
+     only copies files into your Krita user folder.
+  3. Restart Krita.
+  4. Open Settings > Configure Krita > Python Plugin Manager, tick
+     "Momo Color Picker", then restart Krita once more (required).
+  5. Open the picker via Settings > Dockers > Momo Color Picker, or press
+     Shift+B to pop it up. The popup opens around the mouse pointer and stays
+     inside the Krita window.
+
+Notes
+  - The popup closes when you click outside it by default; "Keep popup on top"
+    is grayed out while that option is on. Turn the auto-close option off to
+    enable it.
+  - The keymap is fully customizable: Settings > Key functions... lets you map
+    area x modifier x mouse button to an action; changes apply immediately.
+  - Lightness standard can be switched in Settings > Lightness standard:
+    "Oklab L" (perceptual, default) or "Grayscale (soft proof)".
+    Details are in the plugin manual: open hsv_picker/Manual.html, or click
+    "Manual" in the Python Plugin Manager.
+
+Uninstall
+  Remove these three items, then restart Krita:
+    %APPDATA%\krita\pykrita\hsv_picker
+    %APPDATA%\krita\pykrita\hsv_picker.desktop
+    %APPDATA%\krita\actions\hsv_picker.action
+
+License
+  This plugin: GPL-3.0-or-later (full text in LICENSE).
+  Bundled numpy 2.3.0: BSD-3-Clause; its license text is kept in
+  pykrita/hsv_picker/vendor/numpy-2.3.0.dist-info/LICENSE.txt.

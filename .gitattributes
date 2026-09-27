@@ -1,0 +1,22 @@
+# 文本文件入库统一 LF；Windows 安装脚本/说明保留 CRLF
+* text eol=lf
+*.bat text eol=crlf
+*.txt text eol=crlf
+
+# 内置 numpy 按原字节入库（含 .lib/.pyd/.dll 等，不做换行转换）
+# Bundled numpy is stored byte-for-byte (no EOL conversion)
+pykrita/hsv_picker/vendor/** -text
+
+# 二进制文件不做换行转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.bmp binary
+*.zip binary
+*.whl binary
+*.pyd binary
+*.dll binary
+*.so binary

@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 开发分支不带 numpy（本地用 tools/fetch_vendor.py 拉取）
+# numpy is not committed on this (dev) branch; run tools/fetch_vendor.py locally
+vendor/
+
+# Build products and scratch files
+dist/
+tmp/
+*.log
+
+# Editors
+.vs/
+.idea/
