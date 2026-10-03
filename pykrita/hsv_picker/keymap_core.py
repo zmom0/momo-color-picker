@@ -38,6 +38,10 @@ ACTIONS = {
     "ring": (
         ("none", "无", "None"),
         ("hue_hsv", "转色相（纯 HSV）", "Rotate hue (plain HSV)"),
+        ("hue_lock_lc_cur", "转色相 + 锁明度 + 锁当前彩度口径",
+         "Rotate hue + lock L + lock current chroma scale"),
+        ("hue_lock_lc_other", "转色相 + 锁明度 + 锁另一彩度口径",
+         "Rotate hue + lock L + lock the other chroma scale"),
         ("hue_lock_lc_abs", "转色相 + 锁明度 + 锁绝对彩度",
          "Rotate hue + lock L + lock absolute chroma C"),
         ("hue_lock_lc_rel", "转色相 + 锁明度 + 锁相对彩度",
@@ -45,11 +49,16 @@ ACTIONS = {
     ),
     "square": (
         ("none", "无", "None"),
-        ("abs", "绝对定位", "Absolute positioning"),
+        ("abs", "点哪到哪", "Absolute positioning"),
         ("abs_lock_l", "绝对定位 + 锁明度", "Absolute positioning + lock lightness"),
         ("abs_lock_c", "绝对定位 + 锁彩度", "Absolute positioning + lock chroma"),
-        ("rel_l", "改明度（相对）", "Change lightness (relative)"),
-        ("rel_c", "改彩度（相对）", "Change chroma (relative)"),
+        ("rel_l", "改明度（锁当前彩度口径）",
+         "Change lightness (locks current chroma scale)"),
+        ("rel_l_other", "改明度（锁另一彩度口径）",
+         "Change lightness (locks the other chroma scale)"),
+        ("rel_c", "改彩度（锁明度）", "Change chroma (locks lightness)"),
+        ("rel_c_other", "改彩度（锁明度，临时另一口径）",
+         "Change chroma (locks lightness, temporary other scale)"),
         ("s_only", "只改 S", "Saturation only"),
         ("v_only", "只改 V", "Value only"),
     ),
@@ -69,20 +78,18 @@ ACTIONS = {
     ),
 }
 
-# 默认输入行（v7；唯一来源 = spec v4 §1 R14 / v3 spec §4.2 / v6 R20 / v7 R23）
-# 环上默认：左键锁 L + 锁相对彩度 C_rel（转色相时浓淡比例恒定）、
-# 中键与右键都锁 L + 锁绝对彩度 C（v7 R23：中键 = 右键，用户可在按键表里自行改其一）、
-# Shift+左键 = 纯 HSV（只改色相，S/V 原样不动）。
+# 默认输入行（T-53：临时口径由设置「临时切换键」统一翻转，默认 Shift）
+# 环上默认：左/中/右 = 转色相 + 锁 L + 锁当前口径 C；Ctrl+左 = 纯 HSV。
+# 方块内默认：左 = 点哪到哪；中 = 改明度（锁当前口径）；右 = 改彩度（锁明度）。
+# 按住临时切换键再按基础行 = 同一动作锁另一口径（动作解析时翻转，不占默认行）。
 DEFAULTS = {
-    "ring": (("none", "left", "hue_lock_lc_rel"),
-             ("none", "middle", "hue_lock_lc_abs"),
-             ("none", "right", "hue_lock_lc_abs"),
-             ("shift", "left", "hue_hsv")),
+    "ring": (("none", "left", "hue_lock_lc_cur"),
+             ("none", "middle", "hue_lock_lc_cur"),
+             ("none", "right", "hue_lock_lc_cur"),
+             ("ctrl", "left", "hue_hsv")),
     "square": (("none", "left", "abs"),
                ("none", "middle", "rel_l"),
-               ("none", "right", "rel_c"),
-               ("shift", "left", "s_only"),
-               ("alt", "left", "v_only")),
+               ("none", "right", "rel_c")),
     "lstrip": (("none", "left", "drag_l"),),
     "cstrip": (("none", "left", "drag_c"),),
     "astrip": (("none", "left", "drag_self"),),
@@ -91,6 +98,43 @@ DEFAULTS = {
               ("ctrl", "left", "drag_x2"),
               ("ctrl_shift", "left", "drag_x4"),
               ("alt", "left", "drag_x0_5")),
+}
+
+# T-53 旧默认表迁移：区域的**整组行集合**与某个旧默认集合完全相等才替换为新默认；
+# 多一行/少一行都视为自定义表，原样保留（R21）。旧动作 ID 仍可作为可选动作手动绑定。
+_OLD_DEFAULT_SETS = {
+    "ring": (
+        # v7：左/中/右 = rel / abs / abs，Shift+左 = 纯 HSV
+        frozenset({("none", "left", "hue_lock_lc_rel"),
+                   ("none", "middle", "hue_lock_lc_abs"),
+                   ("none", "right", "hue_lock_lc_abs"),
+                   ("shift", "left", "hue_hsv")}),
+        # T-51/T-52 旧默认：左/中/右 = cur，Shift 三键 = other，Ctrl+左 = 纯 HSV
+        frozenset({("none", "left", "hue_lock_lc_cur"),
+                   ("none", "middle", "hue_lock_lc_cur"),
+                   ("none", "right", "hue_lock_lc_cur"),
+                   ("shift", "left", "hue_lock_lc_other"),
+                   ("shift", "middle", "hue_lock_lc_other"),
+                   ("shift", "right", "hue_lock_lc_other"),
+                   ("ctrl", "left", "hue_hsv")}),
+    ),
+    "square": (
+        # v7：左/中/右 = abs / rel_l / rel_c，Shift+左 = s_only，Alt+左 = v_only
+        frozenset({("none", "left", "abs"), ("none", "middle", "rel_l"),
+                   ("none", "right", "rel_c"), ("shift", "left", "s_only"),
+                   ("alt", "left", "v_only")}),
+        # T-48：v7 + Shift+中/右 = abs_lock_c / abs_lock_l
+        frozenset({("none", "left", "abs"), ("none", "middle", "rel_l"),
+                   ("none", "right", "rel_c"), ("shift", "left", "s_only"),
+                   ("alt", "left", "v_only"),
+                   ("shift", "middle", "abs_lock_c"),
+                   ("shift", "right", "abs_lock_l")}),
+        # T-51/T-52 旧默认：左/中/右 = abs / rel_l / rel_c，Shift+中/右 = rel_l_other / rel_c_other
+        frozenset({("none", "left", "abs"), ("none", "middle", "rel_l"),
+                   ("none", "right", "rel_c"),
+                   ("shift", "middle", "rel_l_other"),
+                   ("shift", "right", "rel_c_other")}),
+    ),
 }
 
 # 数值框拖动倍率（action -> 相对标准速的倍数）
@@ -158,8 +202,31 @@ def mods_from_bools(shift, ctrl, alt, other=False):
     return "none"
 
 
+def mod_bits(mods):
+    """MOD_ID -> (shift, ctrl, alt) 三个布尔位；未知 ID 返回全 False。"""
+    bits = {"none": (0, 0, 0), "shift": (1, 0, 0), "ctrl": (0, 1, 0),
+            "alt": (0, 0, 1), "ctrl_shift": (1, 1, 0), "shift_alt": (1, 0, 1),
+            "ctrl_alt": (0, 1, 1), "ctrl_shift_alt": (1, 1, 1)}.get(str(mods))
+    return tuple(bool(x) for x in (bits or (0, 0, 0)))
+
+
+def mod_contains(outer, inner):
+    """outer 是否包含 inner 的全部修饰位；inner = "none" 恒为 False（不触发自动翻转）。"""
+    ib = mod_bits(inner)
+    if not any(ib):
+        return False
+    ob = mod_bits(outer)
+    return all(i <= o for o, i in zip(ob, ib))
+
+
+def mod_remove(outer, inner):
+    """从 outer 中去掉 inner 的全部修饰位，返回剩余 MOD_ID（可能为 "none"）。"""
+    ob, ib = mod_bits(outer), mod_bits(inner)
+    return mods_from_bools(*(bool(o and not i) for o, i in zip(ob, ib)))
+
+
 def normalize(raw):
-    """把任意来源的数据规范成合法 keymap：补默认、丢非法行、按区域去重。"""
+    """把任意来源的数据规范成合法 keymap：补默认、丢非法行、按区域去重、整组旧默认迁移。"""
     out = default_keymap()
     if not isinstance(raw, dict):
         return out
@@ -168,6 +235,16 @@ def normalize(raw):
         if not isinstance(rows, (list, tuple)):
             continue
         acts = action_ids(area)
+        # 先扫有效行的 (mods, btn, action) 集合：与某个旧默认集合完全相等才整组迁移
+        present = set()
+        for row in rows:
+            if isinstance(row, (list, tuple)) and len(row) == 3:
+                m, b, a = str(row[0]), str(row[1]), str(row[2])
+                if m in MOD_IDS and b in BUTTON_IDS:
+                    present.add((m, b, a if a in acts else "none"))
+        if present in _OLD_DEFAULT_SETS.get(area, ()):
+            out[area] = list(DEFAULTS[area])
+            continue
         valid, seen = [], set()
         for row in rows:
             if not (isinstance(row, (list, tuple)) and len(row) == 3):

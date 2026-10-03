@@ -1,4 +1,4 @@
-﻿Momo Color Picker — installation guide (v1.0.0)
+﻿Momo Color Picker — installation guide (v1.1.0)
 ================================================================
 
 Compatibility

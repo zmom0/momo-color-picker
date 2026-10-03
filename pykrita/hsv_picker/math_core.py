@@ -3,7 +3,6 @@
 
 从 Tkinter 版 hsv_lightness_picker.py 的数学层整体搬移，并删去：
   · 已废弃的 ∇L 正交族：ortho_family / ortho_through / point_where_L
-  · 绝对彩度专用：iso_cabs_curve / solve_s_cabs_scalar
   · Tk 渲染层：curve_px / render_ring / render_square / _png_b64 / to_photoimage / ring_array
 绘图与控件相关的几何、颜色常量也一律不带（改由 Qt 侧的自绘控件负责）。
 本模块可用系统 Python + numpy 直接单测，见 tools/math_selftest.py。
@@ -1596,21 +1595,22 @@ def parse_hex(txt):
     raise ValueError("无法识别的颜色：" + txt)
 
 
-# ================================================================ 批量等彩度线（明度轨迹线簇）
-def crel_isoline_many(ax, rel, targets):
-    """从 C_rel 场里一次性抽取多条等值线（明度轨迹线簇用）。
+# ================================================================ 批量等值线（明度轨迹线簇）公共实现
+def _isoline_many(ax, field, targets):
+    """从二维标量场里一次性抽取多条等值线（C_rel 场与绝对 C 场共用）。
 
     与 crel_isoline 同口径（按 V 行对 S 线性插值），但把 levels 放到第三条轴广播，
     一次算完所有目标；返回 [(S 数组, V 数组), ...]，无解的条目返回空数组。
     """
     ax = np.asarray(ax, dtype=np.float64)
-    rel = np.asarray(rel, dtype=np.float64)
+    field = np.asarray(field, dtype=np.float64)
     tg = np.asarray(targets, dtype=np.float64).reshape(1, 1, -1)     # (1, 1, L)
-    inside = (rel[:, 0][:, None] <= tg[0] + 1e-12) &              (tg[0] - 1e-12 <= rel[:, -1][:, None])                  # (rows, L)
-    k = np.clip(np.sum(rel[:, :, None] < tg, axis=1), 1, rel.shape[1] - 1)   # (rows, L)
-    idx = np.arange(rel.shape[0])[:, None]                           # (rows, 1)
-    r0 = rel[idx, k - 1]
-    r1 = rel[idx, k]
+    inside = (field[:, 0][:, None] <= tg[0] + 1e-12) & \
+             (tg[0] - 1e-12 <= field[:, -1][:, None])                # (rows, L)
+    k = np.clip(np.sum(field[:, :, None] < tg, axis=1), 1, field.shape[1] - 1)   # (rows, L)
+    idx = np.arange(field.shape[0])[:, None]                         # (rows, 1)
+    r0 = field[idx, k - 1]
+    r1 = field[idx, k]
     d = r1 - r0
     t = np.clip((tg[0] - r0) / np.where(np.abs(d) < 1e-15, 1e-15, d), 0.0, 1.0)
     s_line = ax[k - 1] + (ax[k] - ax[k - 1]) * t
@@ -1623,6 +1623,145 @@ def crel_isoline_many(ax, rel, targets):
         else:
             out.append((np.array([]), np.array([])))
     return out
+
+
+def crel_isoline_many(ax, rel, targets):
+    """从 C_rel 场里一次性抽取多条等值线（明度轨迹线簇用）。"""
+    return _isoline_many(ax, rel, targets)
+
+
+# ================================================================ 绝对彩度：等值线场 / 固定 V 反解 S
+def cabs_field(h, n=41):
+    """在 (S,V) 网格上算 Oklab **绝对彩度**场 C(s,v)（网格布局与 crel_field 完全同向）。
+
+    返回 (ax, cabs)：ax 为 S/V 轴刻度，cabs[i, j] 对应 V=ax[i]、S=ax[j]。
+    C = √(a²+b²) 与明度标准（metric）无关；灰轴 S<=1e-6 强制归零，
+    避免 C→0 时相对噪声把等值线带跑。
+    """
+    ax = np.linspace(0.0, 1.0, n)
+    S, V = np.meshgrid(ax, ax)                 # S[i,j]=ax[j]、V[i,j]=ax[i]
+    C = ok_L_C(h, S, V)[1]
+    C[:, 0] = 0.0
+    C[S <= 1e-6] = 0.0
+    return ax, C
+
+
+def cabs_isoline_many(ax, cabs, targets):
+    """从绝对彩度场里一次性抽取多条等值线（绝对口径线簇用）。"""
+    return _isoline_many(ax, cabs, targets)
+
+
+def solve_s_at_cabs(h, V, target, iters=26):
+    """给定 V（数组）、二分反解使**绝对** C = target 的 S（向量化；不可达返回 NaN）。
+
+    固定 h、V 时绝对 C 随 S 单调增；S=1 处仍够不到 target 的行返回 NaN。
+    不依赖 metric：绝对彩度按 Oklab C 定义。
+    """
+    V = np.asarray(V, dtype=np.float64)
+    hi_val = ok_L_C(h, np.ones_like(V), V)[1]      # S=1 处的绝对 C（该行最大值）
+    ok = hi_val >= target - 1e-12
+    lo = np.zeros_like(V)
+    hi = np.ones_like(V)
+    for _ in range(iters):
+        mid = 0.5 * (lo + hi)
+        low = ok_L_C(h, mid, V)[1] < target
+        lo = np.where(low, mid, lo)
+        hi = np.where(~low, mid, hi)
+    s = 0.5 * (lo + hi)
+    return np.where(ok, s, np.nan)
+
+
+def solve_s_cabs_scalar(h, v, target, iters=30):
+    """标量版：给定 V，二分反解绝对 C = target 的 S；够不到返回 NaN。
+
+    绝对定位精修用；走纯 Python (L,C) 快路径，避免 numpy 标量调度开销。
+    """
+    if _oklab_lc_py(h, 1.0, v)[1] < target - 1e-12:
+        return float("nan")
+    lo, hi = 0.0, 1.0
+    for _ in range(iters):
+        mid = 0.5 * (lo + hi)
+        if _oklab_lc_py(h, mid, v)[1] < target:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
+
+def cabs_v_lower(h, target, iters=48):
+    """在 S=1 边上二分求使绝对 C = target 的**最低 V**（不可达返回 None）。
+
+    固定色相时 C(1, V) 随 V 单调增（黑 -> 纯色），所以 target 不超过纯色彩度时
+    解唯一；它就是等绝对 C 线在 S=1 边上的下端点（V 更高处线进入方块内部）。
+    """
+    h = float(h) % 360.0
+    t = float(target)
+    if t <= 1e-12:
+        return 0.0
+    top = float(_oklab_lc_py(h, 1.0, 1.0)[1])
+    if t > top + 1e-9:
+        return None
+    lo, hi = 0.0, 1.0
+    for _ in range(int(iters)):
+        mid = 0.5 * (lo + hi)
+        if float(_oklab_lc_py(h, 1.0, mid)[1]) < t:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
+def cabs_iso_curve(h, target, n_v=33, iters=26, v_extra=None):
+    """等绝对 C 线的显示/约束曲线：返回按 V 升序的 (S, V)，不可达返回 None。
+
+    · 线从 S=1 边的 (1, v_lo) 出发、到 V=1 边结束；v_lo 用 `cabs_v_lower` 精确解出，
+      补进采样避免线在边界处断头。
+    · v_extra（当前色点的 V）并入采样：当前色必在线上，折线严格过点后，
+      方块中键/Shift 绝对定位不会因采样跳过陡段而瞬移。
+    · C=0（灰轴）退化成 S=0 的整条灰轴。
+    """
+    h = float(h) % 360.0
+    t = float(target)
+    n = max(2, int(n_v))
+    if t <= 1e-12:
+        return np.zeros(n, dtype=np.float64), np.linspace(0.0, 1.0, n)
+    v_lo = cabs_v_lower(h, t)
+    if v_lo is None:
+        return None
+    V = np.linspace(v_lo, 1.0, n)
+    if v_extra is not None:
+        try:
+            ve = float(v_extra)
+        except (TypeError, ValueError):
+            ve = None
+        if ve is not None:
+            ve = 0.0 if ve < 0.0 else (1.0 if ve > 1.0 else ve)
+            V = np.unique(np.concatenate([V, [ve]]))
+    S = solve_s_at_cabs(h, V, t, iters=iters)
+    ok = np.isfinite(S)
+    if int(ok.sum()) < 2:
+        return None
+    S = np.clip(np.asarray(S, dtype=np.float64)[ok], 0.0, 1.0)
+    V = np.clip(np.asarray(V, dtype=np.float64)[ok], 0.0, 1.0)
+    if float(V[0]) > v_lo + 1e-12:
+        S = np.concatenate([[1.0], S])
+        V = np.concatenate([[v_lo], V])
+    return S, V
+
+def cabs_cluster_targets(h, mode="fixed"):
+    """绝对 C 线簇档位（与「C 条满量程」无关）。
+
+    · fixed（默认）：固定步长 0.02，0.02~0.36 共 18 档；够不到的明度段自然不画。
+    · even（可选）：当前色相**纯色** C_max(h) = C(S=1,V=1) 的 10%~90%，共 9 档；
+      档位随色相缩放，任意色相都应能画出 9 条线。
+    """
+    if str(mode) == "fixed":
+        return np.arange(1, 19, dtype=np.float64) * 0.02
+    top = float(_oklab_lc_py(float(h), 1.0, 1.0)[1])
+    return np.asarray([top * (i / 10.0) for i in range(1, 10)], dtype=np.float64)
+
+
 
 
 # ================================================================ 绝对彩度：固定 (L, C) 求 (S, V) 与可达色相
