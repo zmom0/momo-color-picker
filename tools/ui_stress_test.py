@@ -12,6 +12,8 @@
   H/I 色条语义、Oklab a/b 分量条
   K 当前色块（HEX 右边、自适应宽度）与预览浮层（三格取值 / 5 种模式 / 位置不压面板 / 跟随 / 无淡出）
   T41/T42 8 种修饰键组合、未知位落回、已删环动作迁移（键表数据层 + 环/方块/条/数值框触发）
+  T51 持久/临时彩度口径、Shift/Ctrl 键位、线簇两档密度、数值框布局取直
+  T53 全局临时切换键（默认 Shift）、悬停即时切换、精确行优先、默认表环 4 / 方块 3 行
 
 用法（kritarunner）：-s uistress -f main
 """
@@ -263,19 +265,46 @@ def _section_bc(panel, c, selfmod, g, cx, cy, ring_pt):
     check("C2b 方块内交换后右键 = 改彩度（明度恒定）", L0b is not None and worst_lb < 1e-5,
           "最大偏差 %.2e" % worst_lb)
 
+    # T-51：Shift+左 / Alt+左默认取消（落回左键 = 点哪到哪）
+    c.set_keymap(kmc.default_keymap())
     c.set_color(60.0, 0.5, 0.5)
     c.mousePressEvent(Ev(cx, cy, Q.LeftButton, None, Q.ShiftModifier))
-    for d in range(0, 60, 6):
-        c.mouseMoveEvent(Ev(cx + d, cy + d, Q.LeftButton, None, Q.ShiftModifier))
-    check("C3 Shift 只改 S", abs(c.v - 0.5) < 1e-12, "V=%.6f" % c.v)
-    c.mouseReleaseEvent(Ev(cx + 60, cy + 60, Q.LeftButton))
-
+    mode_shift_left = c._drag_mode
+    c.mouseReleaseEvent(Ev(cx, cy, Q.LeftButton))
     c.set_color(60.0, 0.5, 0.5)
     c.mousePressEvent(Ev(cx, cy, Q.LeftButton, None, Q.AltModifier))
+    mode_alt_left = c._drag_mode
+    c.mouseReleaseEvent(Ev(cx, cy, Q.LeftButton))
+    check("C3/C4 Shift+左 / Alt+左不再默认（落回左键 = 点哪到哪）",
+          mode_shift_left == "absolute" and mode_alt_left == "absolute",
+          "%s / %s" % (mode_shift_left, mode_alt_left))
+
+    # T-51：s_only / v_only 动作保留，自定义后仍生效
+    km_opt = kmc.default_keymap()
+    kmc.set_action(km_opt, "square", "ctrl_shift", "left", "s_only")
+    kmc.set_action(km_opt, "square", "ctrl_alt", "left", "v_only")
+    c.set_keymap(km_opt)
+    c.set_color(60.0, 0.5, 0.5)
+    c.mousePressEvent(Ev(cx, cy, Q.LeftButton, None,
+                         Q.ControlModifier | Q.ShiftModifier))
     for d in range(0, 60, 6):
-        c.mouseMoveEvent(Ev(cx + d, cy + d, Q.LeftButton, None, Q.AltModifier))
-    check("C4 Alt 只改 V", abs(c.s - 0.5) < 1e-12, "S=%.6f" % c.s)
+        c.mouseMoveEvent(Ev(cx + d, cy + d, Q.LeftButton, None,
+                            Q.ControlModifier | Q.ShiftModifier))
+    s_only_ok = (c._drag_mode == "axis" and c._axis_lock == "s"
+                 and abs(c.v - 0.5) < 1e-12)
     c.mouseReleaseEvent(Ev(cx + 60, cy + 60, Q.LeftButton))
+    c.set_color(60.0, 0.5, 0.5)
+    c.mousePressEvent(Ev(cx, cy, Q.LeftButton, None,
+                         Q.ControlModifier | Q.AltModifier))
+    for d in range(0, 60, 6):
+        c.mouseMoveEvent(Ev(cx + d, cy + d, Q.LeftButton, None,
+                            Q.ControlModifier | Q.AltModifier))
+    v_only_ok = (c._drag_mode == "axis" and c._axis_lock == "v"
+                 and abs(c.s - 0.5) < 1e-12)
+    c.mouseReleaseEvent(Ev(cx + 60, cy + 60, Q.LeftButton))
+    check("C3b/C4b s_only / v_only 动作保留、自定义后仍生效",
+          s_only_ok and v_only_ok, "S-only=%s V-only=%s" % (s_only_ok, v_only_ok))
+    c.set_keymap(kmc.default_keymap())
 
     c.set_color(210.0, 0.5, 0.5)
     c.mousePressEvent(Ev(g["sq"][0], cy, Q.LeftButton))
@@ -448,31 +477,51 @@ def _section_k(panel, selfmod):
           "旧三色块=%s 同一行且在其后=%s 末项=%s Expanding=%s 宽%d->%d(容器) 高=%d(HEX %d) 面板最小高=%d"
           % (has_old, order_ok, last_item_ok, expanding, w_small, w_big, cur_h, hex_h, layout_h))
 
-    # K1b 数值框宽度按字体实测（大字体 / 高 DPI 下不裁字；HEX 的 "#" 不能被切）
-    fm = panel.edit_hex.fontMetrics()
+    # K1b T-51 布局取直：文本始终完整；宽度够则右对齐，放不下则左对齐并停在开头；
+    # L/C/a/b 仍是定宽满文本校验。
+    import re as _re
+    panel._layout_entry_widths()
     frame = panel.edit_hex.style().pixelMetric(QStyle.PM_DefaultFrameWidth)
-    hex_need = fm.horizontalAdvance("#RRGGBB") + 2 * frame + 2
-    hex_text_need = fm.horizontalAdvance(panel.edit_hex.text()) + 2 * frame + 4
-    hex_w_ok = (panel.edit_hex.width() >= hex_need
-                and fm.horizontalAdvance(panel.edit_hex.text()) <= panel.edit_hex.width() - 2 * frame - 4)
-    hv_ok = []
-    for edit, sample in ((panel.edit_h, "210.00"), (panel.edit_s, "100.00"),
-                         (panel.edit_v, "100.00"), (panel.edit_l, "0.0000"),
-                         (panel.edit_c, "0.0000"), (panel.edit_a, "-0.0000"),
-                         (panel.edit_b, "-0.0000")):
+
+    def _need(edit):
+        return edit.fontMetrics().horizontalAdvance(edit.text()) + 2 * frame + 4
+
+    def _left_aligned(edit):
+        return (edit.alignment() & Q.AlignHorizontal_Mask) == Q.AlignLeft
+
+    text_ok = (all(_re.match(r"^\d+\.\d{2}$", e.text()) is not None
+                   for e in (panel.edit_h, panel.edit_s, panel.edit_v))
+               and _re.match(r"^#[0-9A-F]{6}$", panel.edit_hex.text()) is not None
+               and all("…" not in e.text() for e in
+                       (panel.edit_h, panel.edit_s, panel.edit_v, panel.edit_hex)))
+    align_ok = True
+    for edit in (panel.edit_h, panel.edit_s, panel.edit_v, panel.edit_hex):
+        if int(edit.width()) < _need(edit):
+            align_ok = align_ok and _left_aligned(edit)
+            if not edit.hasFocus() and edit.cursorPosition() != 0:
+                align_ok = False
+        else:
+            align_ok = align_ok and not _left_aligned(edit)
+    width_ok = all(panel._w_hsv_0 - 1 <= e.width() <= panel._w_hsv_full + 1
+                   for e in (panel.edit_h, panel.edit_s, panel.edit_v))
+    fixed_ok = []
+    for edit, sample in ((panel.edit_l, "0.0000"), (panel.edit_c, "0.0000"),
+                         (panel.edit_a, "-0.0000"), (panel.edit_b, "-0.0000")):
         need = edit.fontMetrics().horizontalAdvance(sample) + 2 * edit.style().pixelMetric(
             QStyle.PM_DefaultFrameWidth) + 2
-        hv_ok.append(edit.width() >= need)
-    put("  K1b 实测：HEX 框宽 %d px（字体实测 #RRGGBB=%d + 边距 %d + 2 = %d；当前文本需 %d）；"
-        "H/S/V=%d/%d/%d；L/C/a/b=%d/%d/%d/%d（a/b 按更宽的 -0.0000 兜底）"
-        % (panel.edit_hex.width(), fm.horizontalAdvance("#RRGGBB"), 2 * frame, hex_need,
-           hex_text_need, panel.edit_h.width(), panel.edit_s.width(), panel.edit_v.width(),
-           panel.edit_l.width(), panel.edit_c.width(), panel.edit_a.width(), panel.edit_b.width()))
-    check("K1b HEX / H / S / V / L / C / a / b 数值框宽度 ≥ 字体实测宽度（都不裁字）",
-          hex_w_ok and all(hv_ok),
-          "HEX 宽=%d 需≥%d（文本需 %d，实际 %d）；其余=%s"
-          % (panel.edit_hex.width(), hex_need, hex_text_need,
-             fm.horizontalAdvance(panel.edit_hex.text()), hv_ok))
+        fixed_ok.append(edit.width() >= need)
+    put("  K1b 实测：HEX %r（宽 %d/需 %d）；H/S/V 文本 %r/%r/%r（宽 %d/%d/%d）；对齐=%s；"
+        "L/C/a/b=%d/%d/%d/%d（满文本不裁=%s）"
+        % (panel.edit_hex.text(), panel.edit_hex.width(), _need(panel.edit_hex),
+           panel.edit_h.text(), panel.edit_s.text(), panel.edit_v.text(),
+           panel.edit_h.width(), panel.edit_s.width(), panel.edit_v.width(),
+           [_left_aligned(e) for e in (panel.edit_h, panel.edit_s,
+                                        panel.edit_v, panel.edit_hex)],
+           panel.edit_l.width(), panel.edit_c.width(), panel.edit_a.width(),
+           panel.edit_b.width(), fixed_ok))
+    check("K1b T-51 布局取直：文本始终完整；宽够右对齐 / 放不下左对齐停在开头；L/C/a/b 满文本不裁",
+          text_ok and align_ok and width_ok and all(fixed_ok),
+          "text=%s align=%s width=%s fixed=%s" % (text_ok, align_ok, width_ok, fixed_ok))
 
     # K1c 四个分量框等宽 + 四条色条等宽（行结构 [标签][色条 stretch][数值框定宽]）
     four = (panel.edit_l.width(), panel.edit_c.width(), panel.edit_a.width(), panel.edit_b.width())
@@ -705,18 +754,25 @@ def _section_k(panel, selfmod):
     panel.reset_keymap(_broadcast=False)
     panel.set_preview_mode(selfmod.PREVIEW_DEFAULT_MODE, _broadcast=False)
     fresh = selfmod.HsvPickerPanel(dbg_name="defaults")
-    ring_default_on = (_kmc.lookup(fresh.keymap, "ring", "left", "none") == "hue_lock_lc_rel"
-                       and _kmc.lookup(fresh.picker.keymap, "ring", "left", "none") == "hue_lock_lc_rel"
-                       and _kmc.lookup(fresh.keymap, "ring", "left", "shift") == "hue_hsv"
+    ring_default_on = (_kmc.lookup(fresh.keymap, "ring", "left", "none") == "hue_lock_lc_cur"
+                       and _kmc.lookup(fresh.picker.keymap, "ring", "left", "none") == "hue_lock_lc_cur"
+                       and _kmc.find_action(fresh.keymap, "ring", "left", "shift") is None
+                       and _kmc.lookup(fresh.keymap, "ring", "left", "ctrl") == "hue_hsv"
+                       and len(fresh.keymap["ring"]) == 4 and len(fresh.keymap["square"]) == 3
                        and fresh.preview_mode == "hover")
-    put("  K11 实测：a/b 项文案=%r；新面板默认：环左键=%s、环 Shift+左键=%s，浮层模式=%s"
+    put("  K11 实测：a/b 项文案=%r；新面板默认：环左键=%s、Shift+左键精确行=%s、Ctrl+左键=%s，"
+        "ring/square 行数=%d/%d，浮层模式=%s"
         % (ab_text, _kmc.lookup(fresh.keymap, "ring", "left", "none"),
-           _kmc.lookup(fresh.keymap, "ring", "left", "shift"), fresh.preview_mode))
-    check("K11 菜单项改名「a/b 条满量程」+ 环上左键默认「转色相 + 锁明度 + 锁相对彩度」+ 浮层默认「悬停」",
+           _kmc.find_action(fresh.keymap, "ring", "left", "shift"),
+           _kmc.lookup(fresh.keymap, "ring", "left", "ctrl"),
+           len(fresh.keymap["ring"]), len(fresh.keymap["square"]), fresh.preview_mode))
+    check("K11 菜单项改名「a/b 条满量程」+ 环上左键默认「锁当前口径」+ 环 4 / 方块 3 行 + Ctrl+左纯 HSV + 浮层默认「悬停」",
           ab_ok and ring_default_on,
-          "a/b 项=%r 默认：环左键=%s Shift+左键=%s 浮层模式=%s"
+          "a/b 项=%r 默认：环左键=%s Shift+左键精确行=%s Ctrl+左键=%s 行数=%d/%d 浮层模式=%s"
           % (ab_text, _kmc.lookup(fresh.keymap, "ring", "left", "none"),
-             _kmc.lookup(fresh.keymap, "ring", "left", "shift"), fresh.preview_mode))
+             _kmc.find_action(fresh.keymap, "ring", "left", "shift"),
+             _kmc.lookup(fresh.keymap, "ring", "left", "ctrl"),
+             len(fresh.keymap["ring"]), len(fresh.keymap["square"]), fresh.preview_mode))
     fresh.hide()
 
     # K12 定位自动翻转（屏幕右侧放不下 -> 翻到左侧；正常位置贴右侧）
@@ -844,6 +900,964 @@ def _section_k(panel, selfmod):
     panel.set_preview_mode("2s", _broadcast=False)
     panel.preview_hide_ms = 2000
     ov.hide_now()
+
+
+# T-51 测试段：临时彩度切换 + 键位重构 + 线簇密度 + 布局取直
+
+
+def _section_t51(panel, c, selfmod, g, cx, cy):
+    """T-51：持久/临时口径、键位重构、线簇两档密度、相对拖动手感保持。"""
+    from PyQt5.QtCore import Qt as Q
+    from PyQt5.QtWidgets import QApplication
+    import math as _m
+    import numpy as _np
+    mc = selfmod.math_core
+    kmc = selfmod.keymap_core
+    sect("T51 临时彩度切换 + 键位重构 + 线簇密度")
+
+    panel.resize(520, 900)
+    panel.layout().activate()
+    QApplication.processEvents()
+    panel.mid_box.resize(508, 640)
+    panel._layout_picker()
+    QApplication.processEvents()
+    panel.set_lightness_metric("oklab", _broadcast=False)
+    panel.set_chroma_mode("rel", _broadcast=False)
+    panel.set_abs_cluster_mode("even", _broadcast=False)
+    c.set_keymap(kmc.default_keymap())
+    gg = c._geometry()
+    cx = (gg["sq"][0] + gg["sq"][2]) / 2.0
+    cy = (gg["sq"][1] + gg["sq"][3]) / 2.0
+
+    def ring_pt(hh):
+        g2 = c._geometry()
+        rr = (g2["r_in"] + g2["r_out"]) / 2.0
+        rad = _m.radians(float(hh) - 180.0)
+        return (g2["cx"] + rr * _m.cos(rad), g2["cy"] + rr * _m.sin(rad))
+
+    def cabs():
+        return float(mc.ok_L_C(c.h, c.s, c.v)[1])
+
+    def crel():
+        return float(mc.crel_of_xyz(c.h, "oklab", c.s, c.v)[0])
+
+    km = kmc.default_keymap()
+    look_ok = (kmc.lookup(km, "square", "left", "none") == "abs"
+               and kmc.lookup(km, "square", "middle", "none") == "rel_l"
+               and kmc.lookup(km, "square", "right", "none") == "rel_c"
+               and kmc.lookup(km, "ring", "left", "none") == "hue_lock_lc_cur"
+               and kmc.lookup(km, "ring", "middle", "none") == "hue_lock_lc_cur"
+               and kmc.lookup(km, "ring", "right", "none") == "hue_lock_lc_cur"
+               and kmc.lookup(km, "ring", "left", "ctrl") == "hue_hsv"
+               and kmc.find_action(km, "square", "middle", "shift") is None
+               and kmc.find_action(km, "ring", "left", "shift") is None)
+    check("T53a 默认表：方块 3 行 / 环 4 行、Shift 无精确行（自动翻转）、Ctrl+左纯 HSV",
+          look_ok and len(km["square"]) == 3 and len(km["ring"]) == 4, str(km))
+    put("  T53a 实测：方块中=%s Shift+中精确行=%s；环左=%s Shift+左精确行=%s Ctrl+左=%s；square=%d ring=%d"
+        % (kmc.lookup(km, "square", "middle", "none"),
+           kmc.find_action(km, "square", "middle", "shift"),
+           kmc.lookup(km, "ring", "left", "none"),
+           kmc.find_action(km, "ring", "left", "shift"),
+           kmc.lookup(km, "ring", "left", "ctrl"),
+           len(km["square"]), len(km["ring"])))
+
+    # 相对拖动手感：中键 / Shift+中键按下不跳变（锁目标 1.0.0 式相对拖动）
+    press_ok = True
+    for mods in (Q.NoModifier, Q.ShiftModifier):
+        c.set_keymap(kmc.default_keymap())
+        c.set_color(60.0, 0.5, 0.6)
+        s0, v0 = c.s, c.v
+        c.mousePressEvent(Ev(cx, cy, Q.MiddleButton, None, mods))
+        no_jump = abs(c.s - s0) < 1e-12 and abs(c.v - v0) < 1e-12
+        c.mouseReleaseEvent(Ev(cx, cy, Q.MiddleButton, Q.NoButton, mods))
+        press_ok = press_ok and no_jump
+    check("T51b 方块中键 / Shift+中键按下不跳变（相对拖动手感同 1.0.0）",
+          press_ok, "press_ok=%s" % press_ok)
+    put("  T51b 实测：中键 / Shift+中键按下不跳变 = %s" % press_ok)
+
+    # A1/A2：持久口径 -> 方块中键与环左键锁当前口径
+    worst_locked = 0.0
+    detail = []
+    for mode in ("rel", "abs"):
+        panel.set_chroma_mode(mode, _broadcast=False)
+        c.set_keymap(kmc.default_keymap())
+        c.set_color(117.0, 0.62, 0.70)
+        c._last_heavy = 0.0
+        c.mousePressEvent(Ev(cx, cy, Q.MiddleButton))
+        tgt = c.target_crel if mode == "rel" else c.target_cabs
+        worst = abs((crel() if mode == "rel" else cabs()) - tgt) \
+            if tgt is not None else 9.9
+        for d in (6, 18, 30, 42):
+            c._last_heavy = 0.0
+            c.mouseMoveEvent(Ev(cx, cy + d, Q.NoButton, Q.MiddleButton))
+            worst = max(worst, abs((crel() if mode == "rel" else cabs()) - tgt)
+                        if tgt is not None else 9.9)
+        c.mouseReleaseEvent(Ev(cx, cy + 42, Q.MiddleButton, Q.NoButton))
+        c.set_color(117.0, 0.62, 0.70)
+        px, py = ring_pt(140.0)
+        c._last_heavy = 0.0
+        c.mousePressEvent(Ev(px, py, Q.LeftButton))
+        rtgt = c.target_crel if mode == "rel" else c.target_cabs
+        rworst = abs((crel() if mode == "rel" else cabs()) - rtgt) \
+            if rtgt is not None else 9.9
+        c.mouseReleaseEvent(Ev(px, py, Q.LeftButton, Q.NoButton))
+        worst_locked = max(worst_locked, worst, rworst)
+        detail.append((mode, round(worst, 10), round(rworst, 10)))
+    check("T51c 持久口径：rel 中方块中键/环左锁 C_rel；abs 中锁绝对 C（漂移 < 2e-3）",
+          worst_locked < 2e-3, "worst=%.2e %s" % (worst_locked, detail))
+    put("  T51c 实测：rel/abs 方块中键+环左锁漂移 worst=%.2e，明细=%s"
+        % (worst_locked, detail))
+
+    # A3：Shift+中键临时切到另一口径（持久 abs -> rel），显示/锁定/蓝线全部跟随，松手恢复
+    panel.set_chroma_mode("abs", _broadcast=False)
+    panel.set_abs_cluster_mode("even", _broadcast=False)
+    c.set_keymap(kmc.default_keymap())
+    c.set_color(117.0, 0.62, 0.70)
+    c._last_heavy = 0.0
+    c.mousePressEvent(Ev(cx, cy, Q.MiddleButton, None, Q.ShiftModifier))
+    temp_mode = c.temp_chroma_mode
+    eff_mode = c.effective_chroma_mode()
+    strip_mode = panel.strip_c.mode
+    tgt_temp = c.target_crel
+    crel_press = crel()
+    edit_c_temp = panel.edit_c.text()
+    frozen_blue = c._frozen_crel is not None and c._frozen_iso is None
+    line_temp = c._crel_line_now()
+    line_ok = False
+    if line_temp is not None and tgt_temp is not None:
+        cc = _np.asarray(mc.crel_of_sv(c.h, "oklab", line_temp[0], line_temp[1]), float)
+        line_ok = bool(_np.max(_np.abs(cc - tgt_temp)) < 0.01)
+    c._invalidate_clusters()
+    cluster_tgts = [round(float(t), 4) for t, _s, _v in c._clusters()["crel"]]
+    worst_temp = 0.0
+    for d in (6, 18, 30, 42):
+        c._last_heavy = 0.0
+        c.mouseMoveEvent(Ev(cx, cy + d, Q.NoButton, Q.MiddleButton, Q.ShiftModifier))
+        if tgt_temp is not None:
+            worst_temp = max(worst_temp, abs(crel() - tgt_temp))
+    c.mouseReleaseEvent(Ev(cx, cy + 42, Q.MiddleButton, Q.NoButton, Q.ShiftModifier))
+    restored = (c.temp_chroma_mode is None and c.effective_chroma_mode() == "abs"
+                and panel.strip_c.mode == "abs"
+                and abs(float(panel.edit_c.text()) - cabs()) < 1e-4)
+    disp_ok = (strip_mode == "rel"
+               and abs(float(edit_c_temp) - crel_press) < 1e-4)
+    cluster_ok = (len(cluster_tgts) == 9
+                  and all(abs(t - 0.1 * (i + 1)) < 1e-9
+                          for i, t in enumerate(cluster_tgts)))
+    check("T51d Shift+中（持久 abs）临时锁另一口径 rel：C 条/数值框/蓝线/线簇跟随，松手恢复",
+          temp_mode == "rel" and eff_mode == "rel" and tgt_temp is not None
+          and disp_ok and line_ok and frozen_blue and cluster_ok
+          and worst_temp < 2e-3 and restored,
+          "temp=%s eff=%s strip=%s tgt=%s disp=%s line=%s frozen=%s cluster=%s "
+          "drift=%.2e restored=%s"
+          % (temp_mode, eff_mode, strip_mode, tgt_temp, disp_ok, line_ok, frozen_blue,
+             cluster_ok, worst_temp, restored))
+    put("  T51d 实测：Shift+中 temp=%s eff=%s C条=%s C框=%s 蓝线=%s 冻结=%s 线簇=%s "
+        "锁漂移=%.2e 松手恢复=%s"
+        % (temp_mode, eff_mode, strip_mode, disp_ok, line_ok, frozen_blue, cluster_ok,
+           worst_temp, restored))
+
+    # A4：环 Shift+左/中/右 = 锁另一口径；Ctrl+左 = 纯 HSV
+    panel.set_chroma_mode("abs", _broadcast=False)
+    c.set_keymap(kmc.default_keymap())
+    ring_ok = True
+    for btn in (Q.LeftButton, Q.MiddleButton, Q.RightButton):
+        c.set_color(60.0, 0.5, 0.6)
+        c._last_heavy = 0.0
+        px, py = ring_pt(150.0)
+        c.mousePressEvent(Ev(px, py, btn, None, Q.ShiftModifier))
+        ring_ok = (ring_ok and c._drag_mode == "ring_crel"
+                   and c.temp_chroma_mode == "rel")
+        c.mouseReleaseEvent(Ev(px, py, btn, Q.NoButton, Q.ShiftModifier))
+    c.set_color(210.0, 0.5, 0.5)
+    s0, v0 = c.s, c.v
+    px, py = ring_pt(30.0)
+    c.mousePressEvent(Ev(px, py, Q.LeftButton, None, Q.ControlModifier))
+    ctrl_ok = (c._drag_mode == "ring_hue_hsv" and abs(c.s - s0) < 1e-12
+               and abs(c.v - v0) < 1e-12 and abs(c.h - 30.0) < 1e-6)
+    c.mouseReleaseEvent(Ev(px, py, Q.LeftButton, Q.NoButton, Q.ControlModifier))
+    check("T51e 环 Shift+左/中/右 = 锁另一口径（ring_crel）；Ctrl+左 = 纯 HSV",
+          ring_ok and ctrl_ok, "ring=%s ctrl=%s" % (ring_ok, ctrl_ok))
+    put("  T51e 实测：Shift+三键 ring_crel=%s；Ctrl+左纯 HSV=%s（S/V 不变）"
+        % (ring_ok, ctrl_ok))
+
+    # A7：绝对 C 线簇两档密度 + 设置广播/持久化/双面板同步
+    panel.set_chroma_mode("abs", _broadcast=False)
+    panel.set_abs_cluster_mode("even", _broadcast=False)
+    c.set_color(120.0, 0.60, 0.60)
+    c._invalidate_clusters()
+    even_t = [float(t) for t, _s, _v in c._clusters()["crel"]]
+    top = float(mc.ok_L_C(120.0, 1.0, 1.0)[1])
+    even_ok = (len(even_t) == 9 and abs(even_t[0] - 0.1 * top) < 1e-9
+               and abs(even_t[-1] - 0.9 * top) < 1e-9)
+    panel.set_abs_cluster_mode("fixed", _broadcast=False)
+    c._invalidate_clusters()
+    fixed_t = [float(t) for t, _s, _v in c._clusters()["crel"]]
+    fixed_allowed = [0.02 * i for i in range(1, 19)]
+    fixed_ok = (len(fixed_t) >= 7 and abs(fixed_t[0] - 0.02) < 1e-9
+                and all(any(abs(t - a) < 1e-9 for a in fixed_allowed)
+                        for t in fixed_t)
+                and max(fixed_t) <= 0.36 + 1e-9
+                and c.abs_cluster_mode == "fixed")
+    check("T51f 绝对 C 线簇：even 9 档随色相纯色 C_max；fixed 0.02~0.36（可见更多）",
+          even_ok and fixed_ok,
+          "even=%s top=%.4f fixed=%s" % (even_t, top, fixed_t))
+    put("  T51f 实测：even 9 档=[%.6f..%.6f] top=%.6f；fixed 可见 %d 档=[%s]"
+        % (even_t[0], even_t[-1], top, len(fixed_t),
+           ", ".join("%.2f" % x for x in fixed_t)))
+    got_bcast = []
+    listener = lambda k, v: got_bcast.append((k, v))
+    panel.view_listeners.append(listener)
+    fresh = None
+    try:
+        panel.set_abs_cluster_mode("even")
+        fresh = selfmod.HsvPickerPanel(dbg_name="t51cluster")
+        fresh_ok = (fresh.abs_cluster_mode == "even"
+                    and fresh.picker.abs_cluster_mode == "even")
+    finally:
+        if listener in panel.view_listeners:
+            panel.view_listeners.remove(listener)
+    check("T51g 线簇密度设置：广播 + 持久化 + 面板↔picker 同步",
+          ("chroma_abs_cluster", "even") in got_bcast and fresh_ok,
+          "got=%s fresh=%s" % (got_bcast, fresh_ok))
+    put("  T51g 实测：广播=%s；新面板 abs_cluster=%s picker=%s"
+        % (got_bcast, fresh.abs_cluster_mode if fresh is not None else None,
+           fresh.picker.abs_cluster_mode if fresh is not None else None))
+    if fresh is not None:
+        fresh.hide()
+
+    # 收尾复位
+    panel.set_abs_cluster_mode("even", _broadcast=False)
+    panel.set_chroma_mode("rel", _broadcast=False)
+    c.set_keymap(kmc.default_keymap())
+    panel.set_color(60.0, 0.5, 0.6)
+
+
+def _section_t51_layout(panel, c, selfmod):
+    """T-51 布局取直：文本始终完整；宽够右对齐、放不下左对齐并停在开头。"""
+    from PyQt5.QtCore import Qt as Q
+    from PyQt5.QtWidgets import QApplication, QStyle
+    import re as _re
+    sect("T51 数值框布局取直（文本完整 / 窄时左对齐 / 宽时右对齐）")
+
+    panel.set_chroma_mode("rel", _broadcast=False)
+    panel.set_color(123.0, 0.5, 0.6)
+    frame = panel.edit_hex.style().pixelMetric(QStyle.PM_DefaultFrameWidth)
+    edits = (panel.edit_h, panel.edit_s, panel.edit_v, panel.edit_hex)
+    rows = {}
+    for w in (800, 600, 455, 420, 400, 350):
+        panel.resize(w, 900)
+        panel.layout().activate()
+        panel._data_row.activate()
+        QApplication.processEvents()
+        for e in edits:
+            e.clearFocus()
+        panel._layout_entry_widths()
+        panel._data_row.activate()
+        QApplication.processEvents()
+
+        def _need(edit):
+            return edit.fontMetrics().horizontalAdvance(edit.text()) + 2 * frame + 4
+
+        def _is_left(edit):
+            return (edit.alignment() & Q.AlignHorizontal_Mask) == Q.AlignLeft
+
+        rows[w] = {
+            "widths": [e.width() for e in edits],
+            "texts": [e.text() for e in edits],
+            "left": [_is_left(e) for e in edits],
+            "cursor": [e.cursorPosition() for e in edits],
+            "need": [_need(e) for e in edits],
+            "row_w": panel._data_row.geometry().width(),
+            "panel_w": panel.width(),
+            "swatch_w": panel.swatch_cur.width(),
+            "limits": [panel._w_hsv_full, panel._w_hsv_1, panel._w_hsv_0,
+                       panel._w_hex_full, panel._w_hex_min],
+        }
+
+    text_ok = all(_re.match(r"^\d+\.\d{2}$", r["texts"][i]) is not None
+                  for r in rows.values() for i in range(3))
+    text_ok = text_ok and all(_re.match(r"^#[0-9A-F]{6}$", r["texts"][3]) is not None
+                              for r in rows.values())
+    text_ok = text_ok and all("…" not in t for r in rows.values() for t in r["texts"])
+    check("T51h 全尺寸文本始终完整：H/S/V 两位小数、HEX #RRGGBB、无省略号",
+          text_ok, "")
+    put("  T51h 实测：全尺寸文本完整=%s（例 350px H/S/V/HEX=%s/%s/%s/%r）"
+        % (text_ok, rows[350]["texts"][0], rows[350]["texts"][1],
+           rows[350]["texts"][2], rows[350]["texts"][3]))
+
+    wide_ok = all(all(not x for x in rows[w]["left"]) for w in (600, 800))
+    narrow_ok = True
+    for w in (455, 420, 400, 350):
+        r = rows[w]
+        for i in range(4):
+            should_left = r["widths"][i] < r["need"][i]
+            if r["left"][i] != should_left:
+                narrow_ok = False
+            if should_left and r["cursor"][i] != 0:
+                narrow_ok = False
+    check("T51i 600/800 右对齐；窄面板放不下的框左对齐且光标停在开头",
+          wide_ok and narrow_ok, "wide=%s narrow=%s" % (wide_ok, narrow_ok))
+    put("  T51i 实测：600/800 全右对齐=%s；窄面板按需左对齐/光标 0=%s（455 左掩码=%s）"
+        % (wide_ok, narrow_ok, rows[455]["left"]))
+
+    lim = rows[600]["limits"]
+    fits_ok = all(r["row_w"] <= r["panel_w"] - 12 + 1 and r["swatch_w"] >= 24
+                  for r in rows.values())
+    width_ok = (rows[600]["widths"] == [lim[0], lim[0], lim[0], lim[3]]
+                and rows[800]["widths"] == rows[600]["widths"]
+                and rows[455]["widths"][0] == rows[455]["widths"][1] == rows[455]["widths"][2]
+                and rows[350]["widths"][0] == lim[2]
+                and rows[350]["widths"][3] == lim[4])
+    check("T51j 宽度自适应骨架保留：600/800 取上限不变宽、455 等宽、350 HEX 收缩、不溢出",
+          width_ok and fits_ok,
+          "600=%s 455=%s 350=%s" % (rows[600]["widths"], rows[455]["widths"],
+                                     rows[350]["widths"]))
+    put("  T51j 实测：600=%s 800=%s 455=%s 350=%s 行宽/面板=%s/%s 色块>=24=%s"
+        % (rows[600]["widths"], rows[800]["widths"], rows[455]["widths"],
+           rows[350]["widths"], rows[350]["row_w"], rows[350]["panel_w"], fits_ok))
+
+    removed_ok = (not hasattr(panel, "_hsv_precision")
+                  and not hasattr(panel, "_entry_kind")
+                  and all(getattr(e, "_decimals", 2) == 2 for e in edits[:3])
+                  and all(not hasattr(panel, name) for name in
+                          ("_format_hsv_text", "_format_hex_text", "_show_entry_full")))
+    check("T51k 动态小数 / 焦点恢复 / 省略号 / 事件过滤器均已删除",
+          removed_ok, "precision=%s" % getattr(panel, "_hsv_precision", None))
+    put("  T51k 实测：_hsv_precision 存在=%s、_entry_kind 存在=%s、_decimals=%s、旧辅助函数存在=%s"
+        % (hasattr(panel, "_hsv_precision"), hasattr(panel, "_entry_kind"),
+           [getattr(e, "_decimals", 2) for e in edits[:3]],
+           [n for n in ("_format_hsv_text", "_format_hex_text", "_show_entry_full")
+            if hasattr(panel, n)]))
+
+
+def _section_t53(panel, c, selfmod):
+    """T-53：全局临时切换键 + 悬停即时切换 + 默认表精简 + 精确行优先。"""
+    from PyQt5.QtCore import QEvent, Qt as Q
+    from PyQt5.QtGui import QKeyEvent
+    from PyQt5.QtWidgets import QApplication
+    kmc = selfmod.keymap_core
+    sect("T53 全局临时切换键 + 悬停即时切换")
+
+    # ---------- 复位到确定状态 ----------
+    panel.set_chroma_mode("rel", _broadcast=False)
+    panel.set_abs_cluster_mode("fixed", _broadcast=False)
+    panel.set_keymap(kmc.default_keymap(), _broadcast=False)
+    c.set_keymap(kmc.default_keymap())
+    panel.set_temp_chroma_key("shift", _broadcast=False)
+    panel._kb_clear()
+    panel._panel_hovered = False
+    panel._hover_suspended = False
+    panel._picking = False
+    orig_focus = panel._text_input_has_focus
+    orig_cursor = panel._cursor_inside_panel
+    panel._text_input_has_focus = lambda: False
+    panel._cursor_inside_panel = lambda: True
+    gg = c._geometry()
+    cx = (gg["sq"][0] + gg["sq"][2]) / 2.0
+    cy = (gg["sq"][1] + gg["sq"][3]) / 2.0
+    rr = (gg["r_in"] + gg["r_out"]) / 2.0
+    ring_px, ring_py = gg["cx"], gg["cy"] - rr
+
+    def _key(et, key, mods):
+        return QKeyEvent(et, key, mods, "")
+
+    # ---------- T53a 出厂默认 + 设置持久化 / 广播 ----------
+    fresh = selfmod.HsvPickerPanel(dbg_name="t53default")
+    fresh_ok = (fresh.temp_chroma_key == "shift"
+                and fresh.picker.temp_chroma_key == "shift"
+                and fresh.temp_key_actions["shift"].isChecked()
+                and not fresh.temp_key_actions["alt"].isChecked()
+                and len(fresh.keymap["ring"]) == 4 and len(fresh.keymap["square"]) == 3
+                and fresh._hover_filter_installed)
+    got = []
+    fresh.view_listeners.append(lambda which, value: got.append((which, value)))
+    fresh.set_temp_chroma_key("alt")
+    set_ok = (fresh.temp_chroma_key == "alt"
+              and fresh.temp_key_actions["alt"].isChecked()
+              and not fresh.temp_key_actions["shift"].isChecked()
+              and fresh.picker.temp_chroma_key == "alt"
+              and got == [("temp_chroma_key", "alt")])
+    fresh2 = selfmod.HsvPickerPanel(dbg_name="t53read")
+    readback_ok = fresh2.temp_chroma_key == "alt"
+    check("T53a 出厂默认临时切换键=Shift、键表环 4 / 方块 3 行；设置持久化 + 广播",
+          fresh_ok and set_ok and readback_ok,
+          "fresh=%s set=%s got=%s readback=%s" % (fresh_ok, set_ok, got, readback_ok))
+    put("  T53a 实测：默认键=%s 菜单勾选=%s picker=%s 行数=%d/%d；改 Alt 后广播=%s 新面板读到=%s"
+        % ("shift" if fresh_ok else "?", fresh.temp_key_actions["alt"].isChecked(),
+           fresh.picker.temp_chroma_key, len(fresh.keymap["ring"]),
+           len(fresh.keymap["square"]), got, fresh2.temp_chroma_key))
+    for _w in (fresh2, fresh):
+        _w._remove_hover_filter()
+        _w.hide()
+        _w.deleteLater()
+    panel.set_temp_chroma_key("shift", _broadcast=False)
+    QApplication.processEvents()
+
+    # ---------- T53b 按住立即另一口径 / 松开立即恢复；10 次不锁存 ----------
+    cycles_ok = True
+    cyc_detail = []
+    for _i in range(10):
+        panel._panel_hovered = True
+        panel._kb_shift = True
+        panel._update_hover_temp()
+        on = (c.temp_chroma_mode == "abs" and c.effective_chroma_mode() == "abs"
+              and panel.strip_c.mode == "abs"
+              and abs(float(panel.edit_c.text()) - panel._cabs_now()) < 1e-4
+              and "绝对" in panel.edit_c.toolTip())
+        panel._kb_shift = False
+        panel._update_hover_temp()
+        off = (c.temp_chroma_mode is None and c.effective_chroma_mode() == "rel"
+               and panel.strip_c.mode == "rel")
+        cycles_ok = cycles_ok and on and off
+        cyc_detail.append(("on" if on else "ON_X", "off" if off else "OFF_X"))
+    check("T53b 按住切换键悬停 10 次：每次立刻另一口径、松开立刻恢复（无锁存）",
+          cycles_ok, str(cyc_detail[:4]))
+    put("  T53b 实测：10 次循环全部 on/off=%s（前 4 次 %s）" % (cycles_ok, cyc_detail[:4]))
+
+    # ---------- T53c KeyPress/KeyRelease 显式状态；松开即使 modifiers 仍报 Shift 也清 ----------
+    panel._kb_clear()
+    panel._panel_hovered = True
+    panel.eventFilter(None, _key(QEvent.KeyPress, Q.Key_Shift, Q.ShiftModifier))
+    press_ok = panel._kb_shift and c.temp_chroma_mode == "abs"
+    panel.eventFilter(None, _key(QEvent.KeyRelease, Q.Key_Shift, Q.ShiftModifier))
+    release_ok = ((not panel._kb_shift) and c.temp_chroma_mode is None
+                  and panel.strip_c.mode == "rel")
+    check("T53c KeyPress/KeyRelease 显式维护：松开事件即使 modifiers 仍报 Shift 也立即切回",
+          press_ok and release_ok, "press=%s release=%s kb=%s temp=%s"
+          % (press_ok, release_ok, panel._kb_shift, c.temp_chroma_mode))
+    put("  T53c 实测：按下后 kb_shift=%s temp=%s；带 Shift 修饰的 KeyRelease 后 kb_shift=%s temp=%s"
+        % (True, "abs", panel._kb_shift, c.temp_chroma_mode))
+
+    # ---------- T53d 鼠标命中的父链判定：在面板内预览、移出恢复 ----------
+    panel._kb_shift = True
+    panel._cursor_inside_panel = lambda: True
+    panel._refresh_panel_hover()
+    in_ok = panel._panel_hovered and c.temp_chroma_mode == "abs"
+    panel._cursor_inside_panel = lambda: False
+    panel._refresh_panel_hover()
+    out_ok = (not panel._panel_hovered) and c.temp_chroma_mode is None
+    panel._cursor_inside_panel = lambda: True
+    check("T53d 按鼠标命中父链重算：命中面板内才预览，移出立即恢复",
+          in_ok and out_ok, "in=%s out=%s hovered=%s temp=%s"
+          % (in_ok, out_ok, panel._panel_hovered, c.temp_chroma_mode))
+    put("  T53d 实测：命中面板内 in=%s temp=%s；移出后 out=%s temp=%s"
+        % (in_ok, "abs" if in_ok else "?", out_ok, c.temp_chroma_mode))
+
+    # ---------- T53e 两个面板各自判断、互不泄漏；过滤器独立 ----------
+    second = selfmod.HsvPickerPanel(dbg_name="t53second")
+    second.set_chroma_mode("rel", _broadcast=False)
+    second.set_keymap(kmc.default_keymap(), _broadcast=False)
+    second.set_temp_chroma_key("shift", _broadcast=False)
+    second._text_input_has_focus = lambda: False
+    second._kb_shift = True
+    second._panel_hovered = True
+    second._update_hover_temp()
+    panel._kb_shift = True
+    panel._panel_hovered = True
+    panel._update_hover_temp()
+    both_on = (panel.picker.temp_chroma_mode == "abs"
+               and second.picker.temp_chroma_mode == "abs")
+    panel._kb_shift = False
+    panel._update_hover_temp()
+    iso1 = (panel.picker.temp_chroma_mode is None
+            and second.picker.temp_chroma_mode == "abs"
+            and second._kb_shift is True)
+    panel._remove_hover_filter()
+    filter_iso = (not panel._hover_filter_installed)
+    second._kb_shift = False
+    second._update_hover_temp()
+    iso2 = second.picker.temp_chroma_mode is None
+    panel._install_hover_filter()
+    second._remove_hover_filter()
+    second.hide()
+    second.deleteLater()
+    QApplication.processEvents()
+    check("T53e 两个面板各自判定、互不泄漏；应用级过滤器各自安装/移除",
+          both_on and iso1 and filter_iso and iso2 and panel._hover_filter_installed,
+          "both=%s iso1=%s filter=%s iso2=%s" % (both_on, iso1, filter_iso, iso2))
+    put("  T53e 实测：两面板同时按 Shift 都另一口径=%s；只松开主面板后 iso1=%s；"
+        "主/副过滤器独立=%s；副面板松开恢复=%s"
+        % (both_on, iso1, filter_iso, iso2))
+
+    # ---------- T53f 切换键改 Alt / Shift+Alt：悬停与按下动作都按新键翻转 ----------
+    panel.set_temp_chroma_key("alt", _broadcast=False)
+    panel.set_chroma_mode("rel", _broadcast=False)
+    panel._panel_hovered = True
+    panel._kb_alt = True
+    panel._update_hover_temp()
+    hover_alt = c.temp_chroma_mode == "abs"
+    panel._kb_alt = False
+    panel._update_hover_temp()
+    hover_alt_off = c.temp_chroma_mode is None
+    panel._kb_shift = True
+    panel._update_hover_temp()
+    shift_no_flip = c.temp_chroma_mode is None
+    panel._kb_shift = False
+    c.set_keymap(kmc.default_keymap())
+    c.set_color(60.0, 0.5, 0.6)
+    c.mousePressEvent(Ev(cx, cy, Q.MiddleButton, None, Q.AltModifier))
+    press_alt = (c.temp_chroma_mode == "abs" and c._drag_mode == "rel_right")
+    c.mouseReleaseEvent(Ev(cx, cy, Q.MiddleButton, Q.NoButton, Q.AltModifier))
+    press_alt_off = c.temp_chroma_mode is None
+    c.set_color(60.0, 0.5, 0.6)
+    c.mousePressEvent(Ev(cx, cy, Q.MiddleButton, None, Q.ShiftModifier))
+    press_shift_no = c.temp_chroma_mode is None
+    c.mouseReleaseEvent(Ev(cx, cy, Q.MiddleButton, Q.NoButton, Q.ShiftModifier))
+    check("T53f 切换键=Alt：悬停与方块中键（Alt+中）都翻转；Shift 不再是切换键",
+          hover_alt and hover_alt_off and shift_no_flip
+          and press_alt and press_alt_off and press_shift_no,
+          "hover=%s off=%s shift_no=%s press=%s press_off=%s press_shift_no=%s"
+          % (hover_alt, hover_alt_off, shift_no_flip, press_alt, press_alt_off,
+             press_shift_no))
+    put("  T53f 实测：Alt 悬停翻转=%s/松开=%s（Shift 悬停不翻转=%s）；Alt+中 temp=%s 松手=%s；"
+        "Shift+中 temp=%s" % (hover_alt, hover_alt_off, shift_no_flip,
+                              "abs" if press_alt else "?", press_alt_off,
+                              c.temp_chroma_mode))
+
+    # 组合键：Shift+Alt 需两位全按下
+    panel.set_temp_chroma_key("shift_alt", _broadcast=False)
+    panel._kb_shift = True
+    panel._kb_alt = False
+    panel._update_hover_temp()
+    half_off = c.temp_chroma_mode is None
+    panel._kb_alt = True
+    panel._update_hover_temp()
+    full_on = c.temp_chroma_mode == "abs"
+    panel._kb_alt = False
+    panel._update_hover_temp()
+    half_off2 = c.temp_chroma_mode is None
+    panel._kb_shift = False
+    c.set_color(60.0, 0.5, 0.6)
+    c.mousePressEvent(Ev(cx, cy, Q.MiddleButton, None, Q.ShiftModifier))
+    press_half = c.temp_chroma_mode is None
+    c.mouseReleaseEvent(Ev(cx, cy, Q.MiddleButton, Q.NoButton, Q.ShiftModifier))
+    c.set_color(60.0, 0.5, 0.6)
+    c.mousePressEvent(Ev(cx, cy, Q.MiddleButton, None,
+                         Q.ShiftModifier | Q.AltModifier))
+    press_full = c.temp_chroma_mode == "abs"
+    c.mouseReleaseEvent(Ev(cx, cy, Q.MiddleButton, Q.NoButton,
+                           Q.ShiftModifier | Q.AltModifier))
+    check("T53g 组合切换键 Shift+Alt：悬停与按下都要求两位全按下才算翻转",
+          half_off and full_on and half_off2 and press_half and press_full,
+          "half_off=%s full=%s half2=%s press_half=%s press_full=%s"
+          % (half_off, full_on, half_off2, press_half, press_full))
+    put("  T53g 实测：只按 Shift 悬停 temp=%s；Shift+Alt 悬停 temp=%s；"
+        "按下只用 Shift 翻转=%s；Shift+Alt 翻转=%s"
+        % (None, "abs" if full_on else "?", press_half, press_full))
+
+    # ---------- T53h 精确键表行优先于自动翻转 ----------
+    panel.set_temp_chroma_key("shift", _broadcast=False)
+    panel.set_chroma_mode("rel", _broadcast=False)
+    km = kmc.default_keymap()
+    kmc.set_action(km, "square", "shift", "middle", "abs_lock_c")
+    c.set_keymap(km)
+    c.set_color(60.0, 0.5, 0.6)
+    c.mousePressEvent(Ev(cx, cy, Q.MiddleButton, None, Q.ShiftModifier))
+    exact_abs = (c._drag_mode == "absolute" and c.btn_c
+                 and c.temp_chroma_mode is None)
+    c.mouseReleaseEvent(Ev(cx, cy, Q.MiddleButton, Q.NoButton, Q.ShiftModifier))
+    km2 = kmc.default_keymap()
+    kmc.set_action(km2, "square", "shift", "middle", "rel_l_other")
+    c.set_keymap(km2)
+    c.set_color(60.0, 0.5, 0.6)
+    c.mousePressEvent(Ev(cx, cy, Q.MiddleButton, None, Q.ShiftModifier))
+    exact_other = (c._drag_mode == "rel_right" and c.temp_chroma_mode == "abs")
+    c.mouseReleaseEvent(Ev(cx, cy, Q.MiddleButton, Q.NoButton, Q.ShiftModifier))
+    km3 = kmc.default_keymap()
+    kmc.set_action(km3, "ring", "shift", "left", "hue_hsv")
+    c.set_keymap(km3)
+    c.set_color(60.0, 0.5, 0.6)
+    s0, v0 = c.s, c.v
+    c._last_heavy = 0.0
+    c.mousePressEvent(Ev(ring_px, ring_py, Q.LeftButton, None, Q.ShiftModifier))
+    exact_hsv = (c._drag_mode == "ring_hue_hsv" and c.temp_chroma_mode is None
+                 and abs(c.s - s0) < 1e-12 and abs(c.v - v0) < 1e-12)
+    c.mouseReleaseEvent(Ev(ring_px, ring_py, Q.LeftButton, Q.NoButton, Q.ShiftModifier))
+    check("T53h 精确键表行优先：Shift+中=abs_lock_c / rel_l_other、Shift+环左=hue_hsv 不自动翻转",
+          exact_abs and exact_other and exact_hsv,
+          "abs=%s other=%s hsv=%s" % (exact_abs, exact_other, exact_hsv))
+    put("  T53h 实测：Shift+中精确行=abs_lock_c 不翻转=%s；=rel_l_other 锁另一口径=%s；"
+        "Shift+环左=hue_hsv 纯色相不翻转=%s" % (exact_abs, exact_other, exact_hsv))
+
+    # ---------- T53i 文本焦点不预览；拖动期间动作口径接管、松手按悬停状态刷新 ----------
+    c.set_keymap(kmc.default_keymap())
+    panel.set_keymap(kmc.default_keymap(), _broadcast=False)
+    panel.set_temp_chroma_key("shift", _broadcast=False)
+    panel.set_chroma_mode("rel", _broadcast=False)
+    panel._panel_hovered = True
+    panel._kb_shift = True
+    panel._text_input_has_focus = lambda: True
+    panel._update_hover_temp()
+    focus_off = c.temp_chroma_mode is None
+    panel._text_input_has_focus = lambda: False
+    panel._update_hover_temp()
+    pre_drag = c.temp_chroma_mode == "abs"
+    c.set_color(60.0, 0.5, 0.6)
+    c._last_heavy = 0.0
+    c.mousePressEvent(Ev(cx, cy, Q.MiddleButton))
+    during = c.temp_chroma_mode is None and c._drag_mode == "rel_right"
+    panel._update_hover_temp()
+    during2 = c.temp_chroma_mode is None
+    c.mouseReleaseEvent(Ev(cx, cy, Q.MiddleButton, Q.NoButton))
+    after = c.temp_chroma_mode == "abs" and panel.strip_c.mode == "abs"
+    panel._kb_shift = False
+    panel._update_hover_temp()
+    final_off = c.temp_chroma_mode is None
+    check("T53i 文本焦点不预览；拖动期间动作口径接管、松手后按悬停/按键状态恢复",
+          focus_off and pre_drag and during and during2 and after and final_off,
+          "focus=%s pre=%s during=%s during2=%s after=%s final=%s"
+          % (focus_off, pre_drag, during, during2, after, final_off))
+    put("  T53i 实测：文本焦点 temp=%s；悬停预=%s；拖动中 temp=%s（不被预览覆盖=%s）；"
+        "松手 temp=%s C条=%s；再松开切换键 temp=%s"
+        % (None, "abs" if pre_drag else "?", "None" if during else "?",
+           during2, "abs" if after else "?", panel.strip_c.mode, "None" if final_off else "?"))
+
+    # ---------- T53j 应用失活 / 面板隐藏清空预览；销毁移除过滤器 ----------
+    panel._panel_hovered = True
+    panel._kb_shift = True
+    panel._update_hover_temp()
+    before_deact = c.temp_chroma_mode == "abs"
+    panel.eventFilter(None, QEvent(QEvent.ApplicationDeactivate))
+    deact = (c.temp_chroma_mode is None and not panel._kb_shift
+             and panel._hover_suspended)
+    panel.eventFilter(None, QEvent(QEvent.ApplicationActivate))
+    act_ok = (not panel._hover_suspended) and c.temp_chroma_mode is None
+    panel._kb_shift = True
+    panel._update_hover_temp()
+    resumed = c.temp_chroma_mode == "abs"
+    from PyQt5.QtGui import QHideEvent
+    panel.hideEvent(QHideEvent())
+    hidden = c.temp_chroma_mode is None and not panel._panel_hovered
+    panel._kb_shift = False
+    third = selfmod.HsvPickerPanel(dbg_name="t53destroy")
+    third._text_input_has_focus = lambda: False
+    third._panel_hovered = True
+    third._kb_shift = True
+    third._update_hover_temp()
+    before_destroy = third.picker.temp_chroma_mode == "abs"
+    third._on_panel_destroyed()
+    destroyed = (third.picker.temp_chroma_mode is None
+                 and not third._hover_filter_installed and not third._kb_shift)
+    third.hide()
+    third.deleteLater()
+    QApplication.processEvents()
+    check("T53j 应用失活清状态与预览、恢复需重新按键；面板隐藏清预览；销毁移除过滤器",
+          before_deact and deact and act_ok and resumed and hidden
+          and before_destroy and destroyed,
+          "before=%s deact=%s act=%s resumed=%s hidden=%s destroy=%s"
+          % (before_deact, deact, act_ok, resumed, hidden, destroyed))
+    put("  T53j 实测：失活前预览=%s、失活后清空=%s、激活后需重按=%s、重按恢复=%s；"
+        "hide 后清预览=%s；销毁后清预览/移过滤器=%s"
+        % (before_deact, deact, act_ok, resumed, hidden, destroyed))
+
+    # ---------- T53k 拖动中悬停刷新不得清掉动作临时口径（按压回退回归） ----------
+    # 复位到 bug 真实路径：悬停预览已开 -> Shift+中键按下锁另一口径 -> 拖动事件刷新悬停
+    c.set_keymap(kmc.default_keymap())
+    panel.set_keymap(kmc.default_keymap(), _broadcast=False)
+    panel.set_temp_chroma_key("shift", _broadcast=False)
+    panel.set_chroma_mode("rel", _broadcast=False)
+    panel.set_abs_cluster_mode("fixed", _broadcast=False)
+    panel._text_input_has_focus = lambda: False
+    panel._cursor_inside_panel = lambda: True
+    panel._picking = False
+    panel._panel_hovered = True
+    panel._hover_suspended = False
+    panel._kb_shift = True
+    c.set_color(60.0, 0.5, 0.6)
+    panel._update_hover_temp()
+    k_hover = c.temp_chroma_mode == "abs"
+    c._last_heavy = 0.0
+    c.mousePressEvent(Ev(cx, cy, Q.MiddleButton, None, Q.ShiftModifier))
+    cabs_ref = panel._cabs_now()
+    press_picking = panel._picking is True
+    k_press = (press_picking and c.temp_chroma_mode == "abs")
+    # 拖动中的鼠标移动（应用级过滤器 -> _refresh_panel_hover）不得清掉动作口径
+    panel._refresh_panel_hover()
+    drag_temp = c.temp_chroma_mode
+    drag_strip = panel.strip_c.mode
+    drag_edit = panel.edit_c.text()
+    k_drag = (drag_temp == "abs" and drag_strip == "abs"
+              and abs(float(drag_edit) - cabs_ref) < 1e-4)
+    # 拖动中松开切换键：动作口径仍接管到本次拖动结束
+    panel._kb_shift = False
+    panel._refresh_panel_hover()
+    keyoff_temp = c.temp_chroma_mode
+    keyoff_strip = panel.strip_c.mode
+    k_keyoff = (keyoff_temp == "abs" and keyoff_strip == "abs")
+    c.mouseReleaseEvent(Ev(cx, cy, Q.MiddleButton, Q.NoButton))
+    up_off_temp = c.temp_chroma_mode
+    up_off_strip = panel.strip_c.mode
+    k_up_off = (up_off_temp is None and up_off_strip == "rel")
+    # 键仍按住：松手后立即回到悬停预览（另一口径）
+    panel._panel_hovered = True
+    panel._kb_shift = True
+    panel._update_hover_temp()
+    c.set_color(60.0, 0.5, 0.6)
+    c._last_heavy = 0.0
+    c.mousePressEvent(Ev(cx, cy, Q.MiddleButton, None, Q.ShiftModifier))
+    panel._refresh_panel_hover()
+    c.mouseReleaseEvent(Ev(cx, cy, Q.MiddleButton, Q.NoButton, Q.ShiftModifier))
+    up_on_temp = c.temp_chroma_mode
+    up_on_strip = panel.strip_c.mode
+    k_up_on = (up_on_temp == "abs" and up_on_strip == "abs")
+    check("T53k 拖动中悬停刷新不清动作临时口径：按下锁另一口径，松键/松手按当前悬停状态恢复",
+          k_hover and k_press and k_drag and k_keyoff and k_up_off and k_up_on,
+          "hover=%s press=%s drag=%s keyoff=%s up_off=%s up_on=%s"
+          % (k_hover, k_press, k_drag, k_keyoff, k_up_off, k_up_on))
+    put("  T53k 实测：悬停预=%s；中键按下 picking=%s temp=%s；拖动中刷新后 temp=%s C条=%s "
+        "edit_c=%s（绝对 C=%.4f）；拖动中松开 Shift 后 temp=%s；松手（键已松）temp=%s C条=%s；"
+        "重按后松手（键仍按）temp=%s C条=%s"
+        % ("abs" if k_hover else "?", press_picking, "abs" if k_press else "?",
+           drag_temp, drag_strip, drag_edit, cabs_ref, keyoff_temp, up_off_temp,
+           up_off_strip, up_on_temp, up_on_strip))
+
+    # ---------- T53l 拖动中保持生效口径（按下定死 / 松手重算；替代旧的「按下即清」）----------
+    # 悬停预览 abs（持久 rel）时：按 C 条 / L 条 / a 条 / H·S·V 数值框都不清口径，整段按生效口径取色。
+    c.set_keymap(kmc.default_keymap())
+    panel.set_keymap(kmc.default_keymap(), _broadcast=False)
+    panel.set_temp_chroma_key("shift", _broadcast=False)
+    panel.set_chroma_mode("rel", _broadcast=False)
+    panel.set_abs_cluster_mode("fixed", _broadcast=False)
+    panel._text_input_has_focus = lambda: False
+    panel._cursor_inside_panel = lambda: True
+    panel._picking = False
+    panel._entry_dragging = False
+    panel._strip_active = False
+    panel._panel_hovered = True
+    panel._hover_suspended = False
+    panel._kb_clear()
+
+    def _t53l_hover_on():
+        """进入悬停预览：按切换键 + 鼠标在面板内 => 临时 abs（持久 rel）。"""
+        panel._panel_hovered = True
+        panel._kb_shift = True
+        panel._update_hover_temp()
+
+    def _t53l_ev(x, btn=Q.LeftButton, down=True, mods=Q.ShiftModifier):
+        return Ev(x, 4.0, btn, btn if down else Q.NoButton, mods)
+
+    def _t53l_same_caliber(v):
+        """控件显示口径与实际解释口径一致：abs 模式比绝对 C，rel 模式比 C_rel。"""
+        if panel.strip_c.mode == "abs":
+            return abs(panel._cabs_now() - float(v)) < 1e-3
+        return abs(panel._crel_now() - float(v)) < 1e-3
+
+    # (1) C 条：按下 / 拖动一帧都保持 abs，控件值与实际取色同口径；拖动中刷新 / 松键不改
+    panel.set_color(60.0, 0.5, 0.6)
+    _t53l_hover_on()
+    t53l_c_hover = (c.temp_chroma_mode == "abs" and panel.strip_c.mode == "abs")
+    w_c = max(2, int(panel.strip_c.width()))
+    cap = []
+    cb_orig = panel.strip_c._on_changed
+    panel.strip_c._on_changed = lambda v: (cap.append(float(v)), cb_orig(v))
+    panel.strip_c.mousePressEvent(_t53l_ev(w_c * 0.20))
+    t53l_c_press = (c.temp_chroma_mode == "abs" and panel.strip_c.mode == "abs"
+                    and panel._strip_active and panel._interacting())
+    t53l_c_mode_press = panel.strip_c.mode
+    panel.strip_c.mouseMoveEvent(_t53l_ev(w_c * 0.30))
+    t53l_c_v = cap[-1] if cap else -1.0
+    t53l_c_crel, t53l_c_cabs = panel._crel_now(), panel._cabs_now()
+    t53l_c_same = bool(cap) and _t53l_same_caliber(t53l_c_v)
+    t53l_c_mode_same = (panel.strip_c.mode == c.effective_chroma_mode())
+    panel._update_hover_temp()          # 拖动中悬停刷新：口径按下定死，不变
+    t53l_c_during = (c.temp_chroma_mode == "abs" and panel.strip_c.mode == "abs")
+    panel._cursor_inside_panel = lambda: False   # 模拟鼠标滑出面板：本段拖动口径仍定死
+    panel._refresh_panel_hover()
+    t53l_c_mouseout = (c.temp_chroma_mode == "abs" and panel.strip_c.mode == "abs"
+                       and not panel._panel_hovered)
+    panel._cursor_inside_panel = lambda: True
+    panel._panel_hovered = True
+    panel._kb_shift = False             # 拖动中松开切换键：本段拖动仍按 abs 走完
+    panel._update_hover_temp()
+    t53l_c_keyoff = (c.temp_chroma_mode == "abs" and panel.strip_c.mode == "abs")
+    panel.strip_c.mouseReleaseEvent(_t53l_ev(w_c * 0.30, down=False))
+    panel.strip_c._on_changed = cb_orig
+    t53l_c_up_off = (c.temp_chroma_mode is None and panel.strip_c.mode == "rel"
+                     and not panel._strip_active)
+    _t53l_hover_on()                    # 键仍按住：松手立即恢复预览 abs
+    t53l_c_pre2 = c.temp_chroma_mode == "abs"
+    panel.strip_c.mousePressEvent(_t53l_ev(w_c * 0.30))
+    t53l_c_press2 = (c.temp_chroma_mode == "abs" and panel.strip_c.mode == "abs")
+    panel.strip_c.mouseReleaseEvent(_t53l_ev(w_c * 0.30, down=False))
+    t53l_c_up_on = (c.temp_chroma_mode == "abs" and panel.strip_c.mode == "abs")
+    panel._kb_shift = False
+    panel._update_hover_temp()
+    t53l_c_off = (c.temp_chroma_mode is None and panel.strip_c.mode == "rel")
+
+    # (2) L 条：悬停 abs 时按下拖动，保持的是绝对 C；持久 abs + 预览 rel 时反向保持 C_rel
+    panel.set_color(60.0, 0.5, 0.6)
+    _t53l_hover_on()
+    t53l_l_hover = c.temp_chroma_mode == "abs"
+    cabs0 = panel._cabs_now()
+    w_l = max(2, int(panel.strip_l.width()))
+    panel.strip_l.mousePressEvent(_t53l_ev(w_l * 0.78))
+    t53l_l_press = (c.temp_chroma_mode == "abs" and panel._strip_active)
+    panel.strip_l.mouseMoveEvent(_t53l_ev(w_l * 0.56))
+    t53l_l_dc = abs(panel._cabs_now() - cabs0)
+    t53l_l_lock_abs = t53l_l_dc < 2e-3
+    panel.strip_l.mouseReleaseEvent(_t53l_ev(w_l * 0.56, down=False))
+    t53l_l_up = not panel._strip_active
+    panel._kb_shift = False
+    panel._update_hover_temp()
+    panel.set_chroma_mode("abs", _broadcast=False)
+    panel.set_color(60.0, 0.5, 0.6)
+    _t53l_hover_on()
+    t53l_l_rev_hover = (c.temp_chroma_mode == "rel" and c.effective_chroma_mode() == "rel")
+    crel0 = panel._crel_now()
+    panel.strip_l.mousePressEvent(_t53l_ev(w_l * 0.56))
+    t53l_l_rev_press = (c.temp_chroma_mode == "rel" and panel._strip_active)
+    panel.strip_l.mouseMoveEvent(_t53l_ev(w_l * 0.78))
+    t53l_l_rev_dcrel = abs(panel._crel_now() - crel0)
+    t53l_l_rev_lock = t53l_l_rev_dcrel < 2e-3
+    panel.strip_l.mouseReleaseEvent(_t53l_ev(w_l * 0.78, down=False))
+    panel.set_chroma_mode("rel", _broadcast=False)
+    panel._kb_shift = False
+    panel._update_hover_temp()
+
+    # (3) a/b 条与 H·S·V 数值框：拖动开始不清临时口径、拖动中不变、提交后按当前状态重算
+    panel.set_color(60.0, 0.5, 0.6)
+    _t53l_hover_on()
+    w_a = max(2, int(panel.strip_a.width()))
+    panel.strip_a.mousePressEvent(_t53l_ev(w_a * 0.5))
+    t53l_a_press = (c.temp_chroma_mode == "abs" and panel._strip_active)
+    panel.strip_a.mouseReleaseEvent(_t53l_ev(w_a * 0.5, down=False))
+    t53l_a_up = not panel._strip_active
+    panel.set_color(60.0, 0.5, 0.6)
+    _t53l_hover_on()
+    t53l_e_hover = c.temp_chroma_mode == "abs"
+    panel._on_drag_value("v", 50.0)
+    t53l_e_start = (panel._entry_dragging and c.temp_chroma_mode == "abs"
+                    and panel.strip_c.mode == "abs")
+    panel._update_hover_temp()
+    t53l_e_during = c.temp_chroma_mode == "abs"
+    panel._on_entry_commit()
+    t53l_e_after = (not panel._entry_dragging and c.temp_chroma_mode == "abs"
+                    and panel.strip_c.mode == "abs")
+    panel._kb_shift = False
+    panel._update_hover_temp()
+    t53l_e_off = (c.temp_chroma_mode is None and panel.strip_c.mode == "rel")
+
+    check("T53l 拖动中保持生效口径：C/L/a 条 + H·S·V 数值框按下不清、拖动中定死、松手按当前状态重算",
+          t53l_c_hover and t53l_c_press and t53l_c_same and t53l_c_mode_same
+          and t53l_c_during and t53l_c_mouseout and t53l_c_keyoff and t53l_c_up_off
+          and t53l_c_pre2 and t53l_c_press2 and t53l_c_up_on and t53l_c_off
+          and t53l_l_hover and t53l_l_press and t53l_l_lock_abs and t53l_l_up
+          and t53l_l_rev_hover and t53l_l_rev_press and t53l_l_rev_lock
+          and t53l_a_press and t53l_a_up
+          and t53l_e_hover and t53l_e_start and t53l_e_during
+          and t53l_e_after and t53l_e_off,
+          "C hover=%s press=%s same=%s(v=%.4f crel=%.4f cabs=%.4f modeSame=%s) during=%s "
+          "mouseout=%s keyoff=%s upOff=%s pre2=%s press2=%s upOn=%s off=%s；"
+          "L hover=%s press=%s |ΔC|=%.2e(锁C=%s) up=%s；反向 hover=%s press=%s "
+          "|ΔC_rel|=%.2e(锁Crel=%s)；a press=%s up=%s；E hover=%s start=%s during=%s "
+          "after=%s off=%s"
+          % (t53l_c_hover, t53l_c_press, t53l_c_same, t53l_c_v, t53l_c_crel,
+             t53l_c_cabs, t53l_c_mode_same, t53l_c_during, t53l_c_mouseout,
+             t53l_c_keyoff, t53l_c_up_off, t53l_c_pre2, t53l_c_press2, t53l_c_up_on,
+             t53l_c_off, t53l_l_hover, t53l_l_press, t53l_l_dc, t53l_l_lock_abs,
+             t53l_l_up, t53l_l_rev_hover, t53l_l_rev_press, t53l_l_rev_dcrel,
+             t53l_l_rev_lock, t53l_a_press, t53l_a_up, t53l_e_hover,
+             t53l_e_start, t53l_e_during, t53l_e_after, t53l_e_off))
+    put("  T53l 实测：悬停预=%s；C 条按下 temp=%s C条=%s 同口径=%s（控件 v=%.4f / 实际 "
+        "C_rel=%.4f Cabs=%.4f）；拖动中刷新 temp=%s、鼠标移出 temp=%s、松键 temp=%s、"
+        "松手(键松) temp=%s C条=%s；重按松手(键按) temp=%s C条=%s；L 锁绝对 C 偏差=%.2e；"
+        "反向(持久 abs+预览 rel) 锁 C_rel 偏差=%.2e；a 条按下 temp=%s；数值框拖动中 temp=%s、"
+        "提交后 temp=%s C条=%s、键松后 temp=%s"
+        % ("abs" if t53l_c_hover else "?", "abs" if t53l_c_press else "非abs",
+           t53l_c_mode_press, t53l_c_mode_same, t53l_c_v, t53l_c_crel, t53l_c_cabs,
+           "abs" if t53l_c_during else "非abs",
+           "abs" if t53l_c_mouseout else "非abs",
+           "abs" if t53l_c_keyoff else "非abs",
+           "None" if t53l_c_up_off else "非None", "rel" if t53l_c_up_off else "非rel",
+           "abs" if t53l_c_up_on else "非abs", "abs" if t53l_c_up_on else "非abs",
+           t53l_l_dc, t53l_l_rev_dcrel, "abs" if t53l_a_press else "非abs",
+           "abs" if t53l_e_during else "非abs",
+           "abs" if t53l_e_after else "非abs",
+           "abs" if t53l_e_after else "非abs",
+           "None" if t53l_e_off else "非None"))
+
+    # ---------- T53m abs / s_only / v_only / hue_hsv：不锁彩度的动作保持悬停口径 ----------
+    c.set_keymap(kmc.default_keymap())
+    panel.set_keymap(kmc.default_keymap(), _broadcast=False)
+    panel.set_chroma_mode("rel", _broadcast=False)
+    panel.set_abs_cluster_mode("fixed", _broadcast=False)
+    panel._kb_clear()
+    panel._panel_hovered = True
+    panel.set_color(60.0, 0.5, 0.6)
+    _t53l_hover_on()
+    m_hover = (c.temp_chroma_mode == "abs" and panel.strip_c.mode == "abs")
+    c._last_heavy = 0.0
+    c.mousePressEvent(Ev(cx, cy, Q.LeftButton))
+    m_mode = c._drag_mode
+    m_strip = panel.strip_c.mode
+    c._invalidate_clusters()
+    m_targets = [float(t) for t, _s, _v in c._clusters()["crel"]]
+    m_abs = (m_mode == "absolute" and c.temp_chroma_mode == "abs"
+             and c.effective_chroma_mode() == "abs" and m_strip == "abs"
+             and len(m_targets) > 0
+             and all(any(abs(t - 0.02 * i) < 1e-9 for i in range(1, 19))
+                     for t in m_targets))
+    c.mouseReleaseEvent(Ev(cx, cy, Q.LeftButton, Q.NoButton))
+    m_up_on = (c.temp_chroma_mode == "abs" and panel.strip_c.mode == "abs")
+    panel._kb_shift = False
+    panel._update_hover_temp()
+    m_off = (c.temp_chroma_mode is None and panel.strip_c.mode == "rel")
+    km_axis = kmc.default_keymap()
+    kmc.set_action(km_axis, "square", "alt", "left", "s_only")
+    kmc.set_action(km_axis, "square", "ctrl", "left", "v_only")
+    panel.set_keymap(km_axis, _broadcast=False)
+    panel.set_color(60.0, 0.5, 0.6)
+    _t53l_hover_on()
+    c._last_heavy = 0.0
+    c.mousePressEvent(Ev(cx, cy, Q.LeftButton, None, Q.AltModifier))
+    m_s = (c._drag_mode == "axis" and c._axis_lock == "s" and c.temp_chroma_mode == "abs"
+           and panel.strip_c.mode == "abs")
+    c.mouseReleaseEvent(Ev(cx, cy, Q.LeftButton, Q.NoButton, Q.AltModifier))
+    panel.set_color(60.0, 0.5, 0.6)
+    _t53l_hover_on()
+    c._last_heavy = 0.0
+    c.mousePressEvent(Ev(cx, cy, Q.LeftButton, None, Q.ControlModifier))
+    m_v = (c._drag_mode == "axis" and c._axis_lock == "v" and c.temp_chroma_mode == "abs"
+           and panel.strip_c.mode == "abs")
+    c.mouseReleaseEvent(Ev(cx, cy, Q.LeftButton, Q.NoButton, Q.ControlModifier))
+    panel.set_keymap(kmc.default_keymap(), _broadcast=False)
+    panel.set_color(60.0, 0.5, 0.6)
+    _t53l_hover_on()
+    s0, v0 = c.s, c.v
+    c._last_heavy = 0.0
+    c.mousePressEvent(Ev(ring_px, ring_py, Q.LeftButton, None, Q.ControlModifier))
+    m_hsv = (c._drag_mode == "ring_hue_hsv" and c.temp_chroma_mode == "abs"
+             and panel.strip_c.mode == "abs"
+             and abs(c.s - s0) < 1e-12 and abs(c.v - v0) < 1e-12)
+    c.mouseReleaseEvent(Ev(ring_px, ring_py, Q.LeftButton, Q.NoButton, Q.ControlModifier))
+    panel._kb_shift = False
+    panel._update_hover_temp()
+    m_hsv_off = (c.temp_chroma_mode is None and panel.strip_c.mode == "rel")
+
+    check("T53m abs / s_only / v_only / hue_hsv 拖动中保持悬停口径（线簇/C 条跟随，松手重算）",
+          m_hover and m_abs and m_up_on and m_off and m_s and m_v and m_hsv and m_hsv_off,
+          "hover=%s abs=%s targets=%s upOn=%s off=%s s=%s v=%s hsv=%s hsvOff=%s"
+          % (m_hover, m_abs, [round(t, 4) for t in m_targets[:6]], m_up_on, m_off,
+             m_s, m_v, m_hsv, m_hsv_off))
+    put("  T53m 实测：悬停预=%s；左键 abs 拖动 mode=%s temp=%s C条=%s 线簇档=%s；"
+        "松手(键按) temp=%s；键松 temp=%s；s_only=%s v_only=%s hue_hsv=%s"
+        % ("abs" if m_hover else "?", m_mode, "abs" if m_abs else "非abs", m_strip,
+           [round(t, 4) for t in m_targets[:6]], "abs" if m_up_on else "非abs",
+           "None" if m_off else "非None", m_s, m_v, m_hsv))
+
+    # ---------- 清理：还原真实钩子与设置 ----------
+    panel._text_input_has_focus = orig_focus
+    panel._cursor_inside_panel = orig_cursor
+    panel._kb_clear()
+    panel._panel_hovered = False
+    panel._hover_suspended = False
+    panel._picking = False
+    c.set_keymap(kmc.default_keymap())
+    panel.set_keymap(kmc.default_keymap(), _broadcast=False)
+    panel.set_chroma_mode("rel", _broadcast=False)
+    panel.set_abs_cluster_mode("fixed", _broadcast=False)
+    panel.set_temp_chroma_key("shift", _broadcast=False)
 
 
 def _section_f(panel, c, selfmod):
@@ -1192,11 +2206,11 @@ def _section_h(panel, c, selfmod, g, cx, cy):
     except Exception:
         pass
 
-    # H12 按键表：环上左键默认「转色相 + 锁明度 + 锁相对彩度」（v6 R20）
+    # H12 按键表：环上左键默认「转色相 + 锁明度 + 锁当前口径」（T-51 新默认）
     _kmc = selfmod.keymap_core
-    default_on = (_kmc.lookup(c.keymap, "ring", "left", "none") == "hue_lock_lc_rel")
+    default_on = (_kmc.lookup(c.keymap, "ring", "left", "none") == "hue_lock_lc_cur")
     panel.set_keymap(_kmc.default_keymap(), _broadcast=False)
-    on = (_kmc.lookup(c.keymap, "ring", "left", "none") == "hue_lock_lc_rel")
+    on = (_kmc.lookup(c.keymap, "ring", "left", "none") == "hue_lock_lc_cur")
     c.set_color(60.0, 0.5, 0.6)
     from hsv_picker import math_core as mc
     L0 = float(mc.lightness(c.h, c.s, c.v, c.metric))
@@ -1209,7 +2223,7 @@ def _section_h(panel, c, selfmod, g, cx, cy):
     dL = abs(float(mc.lightness(c.h, c.s, c.v, c.metric)) - L0)
     dC = abs(float(mc.crel_of_xyz(c.h, c.metric, c.s, c.v)[0]) - Crel0)
     c.mouseReleaseEvent(Ev(gg["cx"], gg["cy"], Q.LeftButton))
-    check("H12 环上左键默认「转色相 + 锁明度 + 锁相对彩度」（按键表默认）",
+    check("H12 环上左键默认「转色相 + 锁明度 + 锁当前口径」（按键表默认）",
           default_on and on and dL < 2e-3 and dC < 2e-3,
           "默认=%s 生效=%s ΔL=%.2e ΔC_rel=%.2e" % (default_on, on, dL, dC))
 
@@ -1494,9 +2508,11 @@ def _section_n(panel, c, selfmod, g, cx, cy):
     check("A2 游标位置 × 量程 == 数值框（差 < 1e-4）", worst < 1e-4, "最大差 %.2e" % worst)
     panel.set_chroma_mode("rel", _broadcast=False)
 
-    # ---------- A3：环上右键绝对角度 = 锁 L + 锁绝对 C（可达区内）----------
+    # ---------- A3：环上右键绝对角度 = 锁 L + 锁绝对 C（可达区内；显式挂旧动作 hue_lock_lc_abs）----------
     # v4/R15：中/右键都是**绝对角度**（按下即到点击处）；可达区内 L、C 锁定。
-    c.set_keymap(kmc.default_keymap())
+    km_abs3 = kmc.default_keymap()
+    kmc.set_action(km_abs3, "ring", "none", "right", "hue_lock_lc_abs")
+    c.set_keymap(km_abs3)
     c.set_color(60.0, 0.90, 0.95)
     L0 = float(mc.lightness(c.h, c.s, c.v, "oklab"))
     C0 = float(mc.ok_L_C(c.h, c.s, c.v)[1])
@@ -1746,8 +2762,8 @@ def _section_n(panel, c, selfmod, g, cx, cy):
                       for i in range(d2.table.columnCount())]
     finally:
         selfmod.i18n._LANG = old_lang
-    struct_ok = (headers == ["区域", "输入", "动作"] and len(areas) == 17
-                 and areas.count("ring") == 4
+    struct_ok = (headers == ["区域", "输入", "动作"] and len(areas) == 15
+                 and areas.count("ring") == 4 and areas.count("square") == 3
                  and set(areas) == {"ring", "square", "lstrip", "cstrip",
                                     "astrip", "bstrip", "field"})
     row_h_ok = 0 < row_h <= 32
@@ -1761,7 +2777,7 @@ def _section_n(panel, c, selfmod, g, cx, cy):
                 pass
     put("  A11 实测：表头=%s、行数=%d、区域=%d 个、行高=%.0fpx、英文表头=%s"
         % (headers, len(areas), len(set(areas)), row_h, headers_en))
-    check("A11 自定义按键表可弹出：表头=区域|输入|动作、17 行、7 区域、行高紧凑、中英",
+    check("A11 自定义按键表可弹出：表头=区域|输入|动作、15 行（ring 4 / square 3）、7 区域、行高紧凑、中英",
           struct_ok and row_h_ok and bilingual_ok,
           "struct=%s row_h=%.0f bilingual=%s" % (struct_ok, row_h, bilingual_ok))
 
@@ -1812,9 +2828,12 @@ def _section_n(panel, c, selfmod, g, cx, cy):
     if opened:
         dlg.reset_defaults()
     reset_ok = (kmc.lookup(panel.keymap, "square", "left", "none") == "abs"
-                and kmc.lookup(panel.keymap, "ring", "left", "none") == "hue_lock_lc_rel"
-                and kmc.lookup(panel.keymap, "ring", "left", "shift") == "hue_hsv"
-                and kmc.lookup(panel.keymap, "ring", "right", "none") == "hue_lock_lc_abs")
+                and len(panel.keymap["square"]) == 3
+                and kmc.lookup(panel.keymap, "ring", "left", "none") == "hue_lock_lc_cur"
+                and kmc.find_action(panel.keymap, "ring", "left", "shift") is None
+                and kmc.lookup(panel.keymap, "ring", "left", "ctrl") == "hue_hsv"
+                and kmc.lookup(panel.keymap, "ring", "right", "none") == "hue_lock_lc_cur"
+                and len(panel.keymap["ring"]) == 4)
     menu_texts = [a.text() for a in panel.menu.actions()]
     old_menu_gone = (not hasattr(panel, "act_swap_ring") and not hasattr(panel, "act_swap_square")
                      and not hasattr(panel, "act_ring_lock")
@@ -1826,7 +2845,7 @@ def _section_n(panel, c, selfmod, g, cx, cy):
     check("A20c 同区重复输入拒绝 + 恢复默认可用 + 三个旧菜单项已删除",
           dup_rej and add_ok and reset_ok and old_menu_gone,
           "dup=%s add=%s reset=%s gone=%s" % (dup_rej, add_ok, reset_ok, old_menu_gone))
-    # 插件版本可见性（__version__ + 设置菜单「关于… v1.0.0」+ 对话框内容）
+    # 插件版本可见性（__version__ + 设置菜单「关于… v1.1.0」+ 对话框内容）
     ver = getattr(selfmod, "__version__", None)
     about_text = panel.act_about.text() if hasattr(panel, "act_about") else ""
     from PyQt5.QtWidgets import QMessageBox as _QMB
@@ -1846,18 +2865,20 @@ def _section_n(panel, c, selfmod, g, cx, cy):
         _QMB.exec_ = _orig_exec
     info = captured.get("info", "")
     slogan = captured.get("text", "")
-    dialog_ok = ("OKLAB/OKLCH" in slogan and "1.0.0" in info
+    dialog_ok = ("OKLAB/OKLCH" in slogan and "1.1.0" in info
                  and "GPL-3.0-or-later" in info and "BSD-3" in info)
     put("  版本实测：__version__=%s；菜单项=%r；对话框 slogan=%r info=%r"
         % (ver, about_text, slogan, info))
-    check("版本 1.0.0 在设置菜单可见，关于框含 slogan/版本/GPL/numpy BSD",
-          ver == "1.0.0" and "v1.0.0" in about_text and dialog_ok,
+    check("版本 1.1.0 在设置菜单可见，关于框含 slogan/版本/GPL/numpy BSD",
+          ver == "1.1.0" and "v1.1.0" in about_text and dialog_ok,
           "version=%s about=%r dialog=%s" % (ver, about_text, dialog_ok))
     if dlg is not None:
         dlg.hide()
 
-    # ---------- A21：环上右键绝对角度 + 不可达钳到最近可达边界 ----------
-    c.set_keymap(kmc.default_keymap())
+    # ---------- A21：环上右键绝对角度 + 不可达钳到最近可达边界（显式挂旧动作 hue_lock_lc_abs）----------
+    km_abs21 = kmc.default_keymap()
+    kmc.set_action(km_abs21, "ring", "none", "right", "hue_lock_lc_abs")
+    c.set_keymap(km_abs21)
     c.set_color(30.0, 0.90, 0.95)
     L21 = float(mc.lightness(c.h, c.s, c.v, "oklab"))
     C21 = float(mc.ok_L_C(c.h, c.s, c.v)[1])
@@ -2073,33 +3094,37 @@ def _section_v5(panel, c, selfmod, g, cx, cy, dock):
     check("A24 「按键功能」弹窗继承实际置顶（弹窗内以弹窗为 parent、切换即时刷新）",
           ok18, str(r18))
 
-    # ---------- A25：v6 R20 色相环 Shift+左键 = 纯 HSV（默认表；只改色相，S/V 不动） ----------
-    kmc.set_action(panel.keymap, "ring", "shift", "left", "none")   # 先清掉，确保下面读到的是默认表
+    # ---------- A25：T-51 色相环 Ctrl+左键 = 纯 HSV（默认表；只改色相，S/V 不动） ----------
     panel.set_keymap(kmc.default_keymap(), _broadcast=False)
+    ctrl_action = kmc.lookup(panel.keymap, "ring", "left", "ctrl")
+    shift_resolved = c._resolve_action("ring", Q.LeftButton, Q.ShiftModifier)
     shift_action = kmc.lookup(panel.keymap, "ring", "left", "shift")
     c.set_color(60.0, 0.5, 0.5)
     s0, v0 = c.s, c.v
     px, py = ring_pt(140.0)
-    c.mousePressEvent(Ev(px, py, Q.LeftButton, None, Q.ShiftModifier))
+    c.mousePressEvent(Ev(px, py, Q.LeftButton, None, Q.ControlModifier))
     mode_hsv = c._drag_mode
     h1, s1, v1 = c.h, c.s, c.v
     ring1_ok = (mode_hsv == "ring_hue_hsv" and abs(h1 - 140.0) < 1e-6
                 and abs(s1 - s0) < 1e-12 and abs(v1 - v0) < 1e-12)
-    c.mouseReleaseEvent(Ev(px, py, Q.LeftButton, Q.NoButton, Q.ShiftModifier))
-    put("  A25a 实测：默认表查表=%s；按下 -> mode=%s h=%.4f S %.6f->%s V %.6f->%s"
-        % (shift_action, mode_hsv, h1, s0, s1, v0, v1))
-    check("A25a 色相环 Shift+左键默认「纯 HSV」并真正生效（mode=ring_hue_hsv）",
-          shift_action == "hue_hsv" and ring1_ok,
-          "查表=%s mode=%s h=%.4f S %.6f->%s V %.6f->%s"
-          % (shift_action, mode_hsv, h1, s0, s1, v0, v1))
+    c.mouseReleaseEvent(Ev(px, py, Q.LeftButton, Q.NoButton, Q.ControlModifier))
+    put("  A25a 实测：默认表 Ctrl+左=%s、Shift+左精确行=%s、解析=%s；按下 -> mode=%s h=%.4f "
+        "S %.6f->%s V %.6f->%s"
+        % (ctrl_action, kmc.find_action(panel.keymap, "ring", "left", "shift"),
+           shift_resolved, mode_hsv, h1, s0, s1, v0, v1))
+    check("A25a 色相环 Ctrl+左键默认「纯 HSV」并真正生效（Shift+左 = 自动翻转锁另一口径）",
+          ctrl_action == "hue_hsv" and shift_resolved == ("hue_lock_lc_cur", True)
+          and ring1_ok,
+          "Ctrl=%s Shift解析=%s mode=%s h=%.4f S %.6f->%s V %.6f->%s"
+          % (ctrl_action, shift_resolved, mode_hsv, h1, s0, s1, v0, v1))
 
-    # A25b：纯 HSV = S / V 精确保留、只有色相变（对照默认左键「锁 L + 锁 C_rel」会同时动 S/V）
+    # A25b：纯 HSV = S / V 精确保留、只有色相变（对照默认左键「锁 L + 锁当前口径」会同时动 S/V）
     c.set_color(210.0, 0.5, 0.5)
     s0, v0 = c.s, c.v
     px, py = ring_pt(0.0)
-    c.mousePressEvent(Ev(px, py, Q.LeftButton, None, Q.ShiftModifier))
+    c.mousePressEvent(Ev(px, py, Q.LeftButton, None, Q.ControlModifier))
     h2, s2, v2 = c.h, c.s, c.v
-    c.mouseReleaseEvent(Ev(px, py, Q.LeftButton, Q.NoButton, Q.ShiftModifier))
+    c.mouseReleaseEvent(Ev(px, py, Q.LeftButton, Q.NoButton, Q.ControlModifier))
     pure_hsv_ok = (abs(h2 - 0.0) < 1e-6 and abs(s2 - s0) < 1e-12
                    and abs(v2 - v0) < 1e-12 and abs(h2 - 210.0 % 360.0) > 1e-6)
     put("  A25b 实测：纯 HSV 转色相 210°->%.1f° 时 S %.6f->%.6f（Δ%.2e）V %.6f->%.6f（Δ%.2e）"
@@ -2197,6 +3222,7 @@ def _section_t41(panel, c, selfmod, g, cx, cy):
     # 前面的用例改过控件尺寸；先让布局结算再取几何
     panel.resize(520, 900)
     panel.layout().activate()
+    panel._layout_entry_widths()      # T-49：先按 520 宽结算数值行精度（拖动期望两位小数）
     QApplication.processEvents()
     panel.mid_box.resize(508, 640)
     panel._layout_picker()
@@ -2247,10 +3273,24 @@ def _section_t41(panel, c, selfmod, g, cx, cy):
     old_json = ('{"ring":[["none","left","%s"],["shift","left","hue_hsv"]],'
                 '"field":[["none","left","drag"]]}' % old_action)
     old_norm = kmc.normalize(kmc.parse(old_json))
-    migrate_ok = (kmc.lookup(old_norm, "ring", "left", "none") == "none"
-                  and kmc.lookup(old_norm, "ring", "left", "shift") == "hue_hsv"
-                  and kmc.lookup(old_norm, "field", "left", "none") == "drag"
-                  and old_action not in kmc.action_ids("ring"))
+    # 单行旧动作/半组旧默认不迁移：无效动作落 none，Shift+左 hue_hsv 保留为用户选择
+    single_ok = (kmc.lookup(old_norm, "ring", "left", "none") == "none"
+                 and kmc.lookup(old_norm, "ring", "left", "shift") == "hue_hsv"
+                 and kmc.lookup(old_norm, "field", "left", "none") == "drag"
+                 and old_action not in kmc.action_ids("ring"))
+    # 整组旧默认（环 4 行）才按指纹迁移：锁行 -> cur、Shift+左 hue_hsv -> Ctrl+左
+    full_json = ('{"ring":[["none","left","hue_lock_lc_rel"],'
+                 '["none","middle","hue_lock_lc_abs"],'
+                 '["none","right","hue_lock_lc_abs"],'
+                 '["shift","left","hue_hsv"]]}')
+    full_norm = kmc.normalize(kmc.parse(full_json))
+    full_ok = (kmc.lookup(full_norm, "ring", "left", "ctrl") == "hue_hsv"
+               and kmc.find_action(full_norm, "ring", "left", "shift") is None
+               and kmc.lookup(full_norm, "ring", "left", "none") == "hue_lock_lc_cur"
+               and kmc.lookup(full_norm, "ring", "middle", "none") == "hue_lock_lc_cur"
+               and kmc.lookup(full_norm, "ring", "right", "none") == "hue_lock_lc_cur"
+               and len(full_norm["ring"]) == 4)
+    migrate_ok = single_ok and full_ok
     km2 = kmc.default_keymap()
     kmc.set_action(km2, "ring", "ctrl_shift_alt", "right", "hue_hsv")
     roundtrip_ok = kmc.normalize(kmc.parse(kmc.dump(km2))) == kmc.normalize(km2)
@@ -2258,12 +3298,14 @@ def _section_t41(panel, c, selfmod, g, cx, cy):
           look_ok and migrate_ok and roundtrip_ok,
           "look=%s migrate=%s roundtrip=%s" % (look_ok, migrate_ok, roundtrip_ok))
     put("  T41b 实测：Shift+Alt+中=%s、Ctrl+Alt+左=%s、Ctrl+Shift+Alt+中(落回)=%s；"
-        "旧表已删动作 -> %s、Shift 行保留=%s；parse(dump()) 往返=%s"
+        "单行旧动作 none=%s/Shift=%s；整组旧默认 -> Ctrl=%s/Shift=%s；parse(dump()) 往返=%s"
         % (kmc.lookup(km, "square", "middle", "shift_alt"),
            kmc.lookup(km, "square", "left", "ctrl_alt"),
            kmc.lookup(km, "square", "middle", "ctrl_shift_alt"),
            kmc.lookup(old_norm, "ring", "left", "none"),
-           kmc.lookup(old_norm, "ring", "left", "shift"), roundtrip_ok))
+           kmc.lookup(old_norm, "ring", "left", "shift"),
+           kmc.lookup(full_norm, "ring", "left", "ctrl"),
+           kmc.lookup(full_norm, "ring", "left", "shift"), roundtrip_ok))
 
     # ---------- 行为层：环 / 方块 / 条 / 数值框各一个此前不支持的新组合 ----------
     # 环：Ctrl+Alt+左键 = 纯 HSV
@@ -2345,10 +3387,10 @@ def _section_t41(panel, c, selfmod, g, cx, cy):
     meta_none = c._lookup_action("ring", Q.LeftButton, Q.MetaModifier)
     meta_shift = c._lookup_action("ring", Q.LeftButton, Q.MetaModifier | Q.ShiftModifier)
     check("T41d Meta 未知键落回 none 行（Meta+Shift 不误触 Shift 行）",
-          meta_none == "hue_lock_lc_rel" and meta_shift == "hue_lock_lc_rel",
+          meta_none == "hue_lock_lc_cur" and meta_shift == "hue_lock_lc_cur",
           "meta=%s meta+shift=%s" % (meta_none, meta_shift))
-    put("  T41d 实测：Meta+左=%s、Meta+Shift+左=%s（默认环 none 行=%s、Shift 行=%s）"
-        % (meta_none, meta_shift, "hue_lock_lc_rel", "hue_hsv"))
+    put("  T41d 实测：Meta+左=%s、Meta+Shift+左=%s（未知位一律落回环 none 行）"
+        % (meta_none, meta_shift))
 
     # ---------- 按键对话框：修饰键下拉 8 项且顺序 / 中英 label 正确 ----------
     old_lang = selfmod.i18n._LANG
@@ -2512,15 +3554,24 @@ def _section_v7(panel, c, selfmod, g, cx, cy, dock):
     check("A28 a/b 条不受明度标准影响（内部 L 轴仍是 Oklab L、读数不变）",
           a28_ok, "Lg=%.6f ok=%.6f gray=%.6f stripL=%.6f" % (Lab_g, ok_l, gray_l, strip_a_L))
 
-    # ---------- A29 环中键新默认 ----------
+    # ---------- A29 环左/中/右新默认（T-53）----------
     km = kmc.default_keymap()
+    c.set_keymap(km)
     mid = kmc.lookup(km, "ring", "middle", "none")
+    left = kmc.lookup(km, "ring", "left", "none")
     right = kmc.lookup(km, "ring", "right", "none")
+    shift_resolved = c._resolve_action("ring", Q.LeftButton, Q.ShiftModifier)
+    ctrl = kmc.lookup(km, "ring", "left", "ctrl")
     rings = len(km.get("ring", []))
-    put("  A29 实测：环中键=%s、环右键=%s、ring 行数=%d" % (mid, right, rings))
-    check("A29 色相环中键默认 = hue_lock_lc_abs（与右键同）、ring 仍 4 行",
-          mid == "hue_lock_lc_abs" and mid == right and rings == 4,
-          "mid=%s right=%s rows=%d" % (mid, right, rings))
+    put("  A29 实测：环左/中/右=%s/%s/%s、Shift+中精确行=%s/解析=%s、Ctrl+左=%s、ring 行数=%d"
+        % (left, mid, right, kmc.find_action(km, "ring", "middle", "shift"),
+           shift_resolved, ctrl, rings))
+    check("A29 色相环左/中/右默认 = 锁当前口径、Shift 自动翻转锁另一口径、Ctrl+左 = 纯 HSV、ring 4 行",
+          left == mid == right == "hue_lock_lc_cur"
+          and shift_resolved == ("hue_lock_lc_cur", True)
+          and ctrl == "hue_hsv" and rings == 4,
+          "left=%s mid=%s right=%s shift=%s ctrl=%s rows=%d"
+          % (left, mid, right, shift_resolved, ctrl, rings))
 
     # ---------- A30 对话框跟随宿主 ----------
     pop = None; dlg24 = None
@@ -2621,6 +3672,9 @@ def main(*args):
     panel.set_ab_mode("box", _broadcast=False)
     panel.set_show_ab(True, _broadcast=False)
     panel.set_lightness_metric("oklab", _broadcast=False)
+    panel.set_temp_chroma_key("shift", _broadcast=False)
+    panel.set_abs_cluster_mode("fixed", _broadcast=False)
+    panel._kb_clear()
     _section_a(panel)
 
     panel.resize(520, 900)
@@ -2641,6 +3695,9 @@ def main(*args):
     _section_v5(panel, c, hp, g, cx, cy, dock)
     _section_v7(panel, c, hp, g, cx, cy, dock)
     _section_t41(panel, c, hp, g, cx, cy)
+    _section_t51(panel, c, hp, g, cx, cy)
+    _section_t51_layout(panel, c, hp)
+    _section_t53(panel, c, hp)
     _section_f(panel, c, hp)          # 最后跑（会销毁对象）
 
     put("")

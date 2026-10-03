@@ -483,6 +483,194 @@ def test_abs_chroma():
 
 
 
+def test_t48_cabs():
+    """T-48：绝对彩度场 / 等值线 / 固定 V 反解 S（C_abs 口径）。"""
+    print("")
+    print("== 10.5 绝对彩度反解与等值线（T-48）==")
+    hues = (0.0, 30.0, 117.3, 200.0, 300.0)
+    targets = tuple(0.04 * i for i in range(1, 10))     # 固定档位 0.04~0.36
+
+    # 1) 固定 V 反解往返：可解行逐行 |C-target| < 1e-6
+    worst = 0.0
+    n_rows = 0
+    for h in hues:
+        v_rows = np.linspace(0.05, 0.95, 19)
+        for tgt in (0.04, 0.10, 0.18, 0.30):
+            s = mc.solve_s_at_cabs(h, v_rows, tgt)
+            ok = np.isfinite(s)
+            n_rows += int(ok.sum())
+            if np.any(ok):
+                c_got = np.asarray(mc.ok_L_C(h, s[ok], v_rows[ok])[1], dtype=float)
+                worst = max(worst, float(np.max(np.abs(c_got - tgt))))
+    check("solve_s_at_cabs 往返：C 误差 < 1e-6", n_rows > 100 and worst < 1e-6,
+          "可解行 %d，maxΔC=%.2e" % (n_rows, worst))
+
+    # 2) 不可达 -> NaN；恰好够到的行不得误判
+    v_probe = np.array([0.05, 0.5, 0.95])
+    hi = np.asarray(mc.ok_L_C(30.0, np.ones_like(v_probe), v_probe)[1], dtype=float)
+    unreach = mc.solve_s_at_cabs(30.0, v_probe, float(np.max(hi)) + 0.02)
+    edge = mc.solve_s_at_cabs(30.0, v_probe, hi * 0.999999)
+    bad_unreach = [i for i in range(len(v_probe)) if not np.isnan(unreach[i])]
+    check("solve_s_at_cabs 不可达返回 NaN、边界可达不误判",
+          not bad_unreach and bool(np.all(np.isfinite(edge))),
+          "不可达误判=%s 边界有限=%s" % (bad_unreach, np.all(np.isfinite(edge))))
+    # 3) 网格布局与方向：cabs[i,j] 对应 V=ax[i]、S=ax[j]；与 ok_L_C 逐点一致
+    hh = 117.3
+    ax, C = mc.cabs_field(hh, n=17)
+    S, V = np.meshgrid(ax, ax)
+    ref = np.asarray(mc.ok_L_C(hh, S, V)[1], dtype=float)
+    ref[:, 0] = 0.0
+    check("cabs_field 形状 (n,n)、方向与 crel_field 一致、逐点等于 ok_L_C",
+          ax.shape == (17,) and C.shape == (17, 17)
+          and bool(np.array_equal(ax, np.linspace(0.0, 1.0, 17)))
+          and bool(np.array_equal(C, ref)),
+          "ax=%s shape=%s 一致=%s" % (ax[0], C.shape, bool(np.array_equal(C, ref))))
+    mono_bad = 0
+    for i in range(C.shape[0]):
+        if C[i, -1] > 0.01 and np.any(np.diff(C[i, :]) < -1e-12):
+            mono_bad += 1
+    check("cabs_field 每行 C 随 S 单调不减（够到有意义彩度的行）", mono_bad == 0,
+          "非单调行 %d" % mono_bad)
+
+    # 4) 线簇 9 条档位值正确、每条 C 误差 < 1e-4
+    worst_line = 0.0
+    n_lines = n_pts = 0
+    for h in hues:
+        axh, Ch = mc.cabs_field(h, n=41)
+        lines = mc.cabs_isoline_many(axh, Ch, targets)
+        for i, (ss, vv) in enumerate(lines):
+            if len(ss) < 2:
+                continue
+            n_lines += 1
+            n_pts += len(ss)
+            cc = np.asarray(mc.ok_L_C(h, ss, vv)[1], dtype=float)
+            worst_line = max(worst_line, float(np.max(np.abs(cc - targets[i]))))
+    check("cabs_isoline_many：每条线 C 误差 < 1e-4（5 色相 × 9 档）",
+          n_lines >= 20 and worst_line < 1e-4,
+          "%d 条 / %d 点，maxΔC=%.2e" % (n_lines, n_pts, worst_line))
+
+    # 5) 过点线按 V 反解严格穿过当前色点；并由该点组成可绘折线
+    s_pt, v_pt = 0.42, 0.63
+    c_pt = float(mc.ok_L_C(hh, s_pt, v_pt)[1])
+    s_exact = float(mc.solve_s_at_cabs(hh, np.array([v_pt]), c_pt)[0])
+    check("过点线在 V=当前值 处严格穿过色点（|ΔS| < 1e-6）",
+          abs(s_exact - s_pt) < 1e-6,
+          "s=%.9f -> %.9f Δ=%.2e" % (s_pt, s_exact, abs(s_exact - s_pt)))
+
+    # 6) 标量版与向量版一致（含不可达一致返回 NaN）
+    worst_sc = 0.0
+    sc_ok = True
+    for h in hues:
+        for tgt in (0.05, 0.15, 0.25):
+            vv = np.array([0.15, 0.35, 0.55, 0.75, 0.9])
+            sv = mc.solve_s_at_cabs(h, vv, tgt)
+            for i in range(len(vv)):
+                s_sc = mc.solve_s_cabs_scalar(h, float(vv[i]), tgt)
+                if np.isfinite(sv[i]):
+                    if not np.isfinite(s_sc):
+                        sc_ok = False
+                    else:
+                        worst_sc = max(worst_sc, abs(float(sv[i]) - s_sc))
+                elif np.isfinite(s_sc):
+                    sc_ok = False
+    check("solve_s_cabs_scalar 与向量版一致（不可达都返回 NaN）",
+          sc_ok and worst_sc < 1e-7, "maxΔS=%.2e 一致=%s" % (worst_sc, sc_ok))
+
+    # 7) C=0 退化：反解落在灰轴、场第 0 列严格为 0
+    s_zero = mc.solve_s_at_cabs(45.0, np.array([0.2, 0.5, 0.8]), 0.0)
+    s_zero_sc = mc.solve_s_cabs_scalar(45.0, 0.5, 0.0)
+    check("C=0 退化：反解 S≈0（向量 + 标量；26/30 次二分的分辨率 ~1e-8）",
+          float(np.max(np.abs(s_zero))) < 1e-7 and abs(s_zero_sc) < 1e-7,
+          "vec max=%.2e scalar=%.2e" % (float(np.max(np.abs(s_zero))), s_zero_sc))
+    check("cabs_field 灰轴（S=0 列）严格为 0",
+          float(np.max(np.abs(C[:, 0]))) == 0.0,
+          "max|C[:,0]|=%.2e" % float(np.max(np.abs(C[:, 0]))))
+
+    # 7b) 完整等绝对 C 线：折线过当前色点、起点在 S=1 边、端点 C=target
+    worst_pt = 0.0
+    n_curve = 0
+    start_s_bad = 0
+    for h, s0, v0 in ((184.0, 1.0, 0.6), (120.0, 0.99, 0.4), (0.0, 1.0, 0.5),
+                      (300.0, 0.5, 0.3), (45.0, 0.05, 0.9), (210.0, 0.999, 0.2)):
+        c0 = float(mc.ok_L_C(h, s0, v0)[1])
+        got = mc.cabs_iso_curve(h, c0, n_v=33, iters=26, v_extra=v0)
+        if got is None:
+            continue
+        ss, vv = got
+        n_curve += 1
+        worst_pt = max(worst_pt, float(np.hypot(np.asarray(ss) - s0,
+                                                np.asarray(vv) - v0).min()))
+        if abs(float(ss[0]) - 1.0) > 1e-6:
+            start_s_bad += 1
+    check("cabs_iso_curve 折线严格过当前色点（含 S=1 边端点）且起点在 S=1 边",
+          n_curve >= 5 and worst_pt < 1e-6 and start_s_bad == 0,
+          "曲线 %d 条，过点 maxΔ=%.2e，起点异常 %d" % (n_curve, worst_pt, start_s_bad))
+    ax_hi, C_hi = mc.cabs_field(117.3, n=41)
+    top_hi = float(np.nanmax(C_hi))
+    check("cabs_iso_curve 目标高于纯色彩度时返回 None",
+          mc.cabs_iso_curve(117.3, top_hi + 0.01) is None,
+          "top=%.6f" % top_hi)
+
+    # 8) T-51：线簇档位由 cabs_cluster_targets 生成（even 9 档 / fixed 18 档）
+    even_t = mc.cabs_cluster_targets(117.3, "even")
+    fixed_t = mc.cabs_cluster_targets(117.3, "fixed")
+    check("cabs_cluster_targets fixed = 0.02~0.36 步长 0.02（18 档）",
+          len(fixed_t) == 18 and abs(fixed_t[0] - 0.02) < 1e-12
+          and abs(fixed_t[-1] - 0.36) < 1e-12
+          and bool(np.allclose(np.diff(fixed_t), 0.02, atol=1e-12)),
+          str(fixed_t))
+    top_t = float(mc.ok_L_C(117.3, 1.0, 1.0)[1])
+    check("cabs_cluster_targets even = 纯色 C_max(h) 的 10%~90%（9 档）",
+          len(even_t) == 9 and abs(even_t[0] - 0.1 * top_t) < 1e-12
+          and abs(even_t[-1] - 0.9 * top_t) < 1e-12
+          and bool(np.all(np.diff(even_t) > 0)),
+          str(even_t))
+
+
+def test_t51_cabs_clusters():
+    """T-51：绝对 C 线簇两档密度（even 任意色相 9 条 / fixed 18 档更密）。"""
+    print("")
+    print("== 10.6 绝对 C 线簇密度（T-51）==")
+    hues = (0.0, 26.0, 60.0, 120.0, 180.0, 240.0, 300.0, 359.0)
+    worst_even = 0.0
+    min_even = 99
+    visible_fixed = []
+    visible_old = []
+    f_ok = e_ok = True
+    for h in hues:
+        t_even = np.asarray(mc.cabs_cluster_targets(h, "even"), dtype=float)
+        top = float(mc.ok_L_C(h, 1.0, 1.0)[1])
+        if not (len(t_even) == 9 and abs(t_even[-1] - 0.9 * top) < 1e-12):
+            e_ok = False
+        ax, cg = mc.cabs_field(h, n=41)
+        lines = mc.cabs_isoline_many(ax, cg, t_even)
+        n_vis = sum(1 for ss, _vv in lines if len(ss) >= 2)
+        min_even = min(min_even, n_vis)
+        for i, (ss, vv) in enumerate(lines):
+            if len(ss) < 2:
+                continue
+            cc = np.asarray(mc.ok_L_C(h, ss, vv)[1], dtype=float)
+            worst_even = max(worst_even, float(np.max(np.abs(cc - t_even[i]))))
+            if mc.cabs_iso_curve(h, float(t_even[i]), n_v=33, iters=26) is None:
+                e_ok = False
+        t_fixed = np.asarray(mc.cabs_cluster_targets(h, "fixed"), dtype=float)
+        if not (len(t_fixed) == 18 and bool(np.allclose(np.diff(t_fixed), 0.02))):
+            f_ok = False
+        lines_f = mc.cabs_isoline_many(ax, cg, t_fixed)
+        visible_fixed.append(sum(1 for ss, _vv in lines_f if len(ss) >= 2))
+        t_old = np.asarray([0.04 * i for i in range(1, 10)], dtype=float)
+        lines_o = mc.cabs_isoline_many(ax, cg, t_old)
+        visible_old.append(sum(1 for ss, _vv in lines_o if len(ss) >= 2))
+    check("even：8 色相 × 9 档全部存在、可见 9 条、每条 C 误差 < 1e-4",
+          e_ok and min_even == 9 and worst_even < 1e-4,
+          "最少可见 %d 条，maxΔC=%.2e" % (min_even, worst_even))
+    check("fixed：8 色相档位都是 0.02~0.36 共 18 档", f_ok, str(visible_fixed))
+    check("fixed(0.02) 可见条数 ≥ 旧 0.04 档，且最密时明显更多",
+          all(a >= b for a, b in zip(visible_fixed, visible_old))
+          and max(visible_fixed) >= 10 and max(visible_fixed) > max(visible_old),
+          "fixed=%s old04=%s" % (visible_fixed, visible_old))
+
+
 def test_reachable_hue():
     print("")
     print("== 11. 最近可达边界与锁相对彩度求色 ==")
@@ -800,7 +988,8 @@ def main():
     for fn in (test_color_math, test_hsv_roundtrip, test_iso_curve, test_curves_utils,
                test_crel, test_oklab_ab, test_lbar, test_parse, test_strip, test_isoline_append_guard,
                test_v_from_lightness,
-               test_abs_chroma, test_reachable_hue, test_gray_metric,
+               test_abs_chroma, test_t48_cabs, test_t51_cabs_clusters,
+               test_reachable_hue, test_gray_metric,
                test_gray_ab_slice_fixes, test_perf):
         try:
             fn()

@@ -879,11 +879,11 @@ EXPECTED_SIZE = {
     "02-ring-square.png": (846, 846),
     "03-unreachable.png": (1556, 769),
     "04-strips.png": (1200, 276),
-    "05-keymap.png": (820, 783),
+    "05-keymap.png": (820, 731),
     "06-popup.png": (493, 630),
     "07-overlay.png": (700, 640),
     "08-history.png": (240, 501),
-    "09-settings.png": (605, 488),
+    "09-settings.png": (605, 510),
     "10-metric.png": (1778, 880),
     "11-ring-modes-crel60.png": (856, 1292),
     "12-ring-modes-crel100.png": (856, 1292),
@@ -1071,21 +1071,26 @@ def build_08_history():
     _save_png(canvas, "08-history.png")
 
 def build_09_settings():
-    """设置菜单 + 子菜单截图，按实际像素拼接，不加说明文字。"""
+    """设置菜单 + 子菜单截图，按实际像素纵向排开，互不遮挡，不加说明文字。"""
     Image, _D = _pil()
     menu = _open_raw("09-menu")
     lay = _read_json(os.path.join(RAW, "09-settings.json"), {})
-    canvas = Image.new("RGB", (605, menu.height), menu.getpixel((2, 2)))
-    canvas.paste(menu, (0, 0))
-    for sub, dy in (("chroma", 160), ("metric", 224), ("preview", 288)):
+    placed = []
+    y = 150
+    for sub in ("chroma", "metric", "preview"):
         meta = (lay.get("subs") or {}).get(sub) or {}
         name = "09-menu-" + sub
         if not os.path.isfile(os.path.join(RAW, name + ".png")):
             continue
         im = _open_raw(name)
         off = meta.get("offset") or [menu.width + 1, 0]
-        dy = min(int(dy), canvas.height - im.height)
-        canvas.paste(im, (int(off[0]), max(0, dy)))
+        placed.append((im, int(off[0]), int(y)))
+        y += im.height + 4
+    height = max(menu.height, (placed[-1][2] + placed[-1][0].height) if placed else menu.height)
+    canvas = Image.new("RGB", (605, height), menu.getpixel((2, 2)))
+    canvas.paste(menu, (0, 0))
+    for im, x, yy in placed:
+        canvas.paste(im, (x, yy))
     _save_png(canvas, "09-settings.png")
 
 def build_10_metric():

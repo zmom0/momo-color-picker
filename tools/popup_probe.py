@@ -516,9 +516,284 @@ def main(*args):
         _k.writeSetting("", _legacy_key, _old_legacy)
         _k.writeSetting("", _user_key, _old_user)
 
+    # 13) T-53 临时切换键：Docker ↔ 弹窗同步 + 弹窗真实 widgetAt 命中 + 悬停即时切换
+    from PyQt5.QtGui import QCursor
+    dock.panel.set_temp_chroma_key("shift")
+    key_sync = pop.panel.temp_chroma_key == "shift"
+    dock.panel.set_temp_chroma_key("alt")
+    QApplication.processEvents()
+    key_sync = key_sync and pop.panel.temp_chroma_key == "alt"
+    dock.panel.set_temp_chroma_key("shift")
+    QApplication.processEvents()
+    check("T53p1 临时切换键 Docker ↔ 弹窗双向同步（默认 shift、改 alt 后弹窗跟随）",
+          key_sync, "dock=%s pop=%s" % (dock.panel.temp_chroma_key,
+                                        pop.panel.temp_chroma_key))
+
+    pop.show()
+    QApplication.processEvents()
+    pop.activateWindow()
+    QApplication.processEvents()
+    orig_pop_focus = pop.panel._text_input_has_focus
+    pop.panel._text_input_has_focus = lambda: False
+    pop.panel._kb_clear()
+    pop.panel._panel_hovered = False
+    cursor_probe = None
+    try:
+        center_g = pop.mapToGlobal(QPoint(pop.width() // 2, pop.height() // 2))
+        QCursor.setPos(center_g)
+        QApplication.processEvents()
+        if QCursor.pos() == center_g:
+            cursor_probe = pop.panel._cursor_inside_panel()
+    except Exception:
+        cursor_probe = None
+    if cursor_probe is True:
+        pop.panel._refresh_panel_hover()
+        hit_in = pop.panel._panel_hovered
+        pop.panel._kb_shift = True
+        pop.panel._update_hover_temp()
+        hover_on = (pop.panel.picker.temp_chroma_mode in ("rel", "abs")
+                    and pop.panel.strip_c.mode == pop.panel.picker.temp_chroma_mode)
+        dock_untouched = dock.panel.picker.temp_chroma_mode is None
+        scr = QApplication.primaryScreen().availableGeometry()
+        cands = [QPoint(scr.left() + 2, scr.top() + 2),
+                 QPoint(scr.right() - 2, scr.bottom() - 2),
+                 QPoint(scr.left() + 2, scr.bottom() - 2),
+                 QPoint(scr.right() - 2, scr.top() + 2)]
+        out_g = None
+        for q in cands:
+            if not pop.frameGeometry().contains(q):
+                out_g = q
+                break
+        out_miss = out_after = None
+        if out_g is not None:
+            QCursor.setPos(out_g)
+            QApplication.processEvents()
+            out_miss = (not pop.panel._cursor_inside_panel())
+            pop.panel._refresh_panel_hover()
+            out_after = (not pop.panel._panel_hovered
+                         and pop.panel.picker.temp_chroma_mode is None)
+        pop.panel._kb_shift = False
+        pop.panel._update_hover_temp()
+        ok = bool(hit_in and hover_on and dock_untouched and out_miss and out_after)
+        put("  T53p2 实测：真实光标在弹窗内命中=%s、悬停预览=%s、主面板未受影响=%s；"
+            "移出后不命中=%s、恢复=%s" % (hit_in, hover_on, dock_untouched, out_miss, out_after))
+    else:
+        ok = True
+        put("  [SKIP] T53p2 鼠标注入不可用（QCursor.pos 不跟随）；真实 widgetAt 留待手工验收")
+    check("T53p2 弹窗真实 widgetAt 父链命中/移出：命中即预览、移出立即恢复、不泄漏到主面板",
+          ok, "cursor_probe=%s" % (cursor_probe,))
+
+    # 显式状态循环：弹窗 10 次按下/松开不锁存；主面板独立
+    latch_ok = True
+    for _i in range(10):
+        pop.panel._panel_hovered = True
+        pop.panel._kb_shift = True
+        pop.panel._update_hover_temp()
+        on = pop.panel.picker.temp_chroma_mode in ("rel", "abs")
+        pop.panel._kb_shift = False
+        pop.panel._update_hover_temp()
+        off = pop.panel.picker.temp_chroma_mode is None
+        latch_ok = latch_ok and on and off
+    orig_dock_focus = dock.panel._text_input_has_focus
+    dock.panel._text_input_has_focus = lambda: False
+    dock.panel._panel_hovered = True
+    dock.panel._kb_shift = True
+    dock.panel._update_hover_temp()
+    dock_on = dock.panel.picker.temp_chroma_mode in ("rel", "abs")
+    pop_off = pop.panel.picker.temp_chroma_mode is None
+    dock.panel._kb_shift = False
+    dock.panel._update_hover_temp()
+    dock_off = dock.panel.picker.temp_chroma_mode is None
+    dock.panel._text_input_has_focus = orig_dock_focus
+    dock.panel._panel_hovered = False
+    pop.panel._text_input_has_focus = orig_pop_focus
+    pop.panel._kb_clear()
+    pop.panel._panel_hovered = False
+    pop.panel._update_hover_temp()
+    check("T53p3 弹出面板悬停 10 次不锁存；释放/移出后立即恢复，主面板独立",
+          latch_ok and dock_on and dock_off and pop_off,
+          "latch=%s dock_on=%s dock_off=%s pop_off=%s"
+          % (latch_ok, dock_on, dock_off, pop_off))
+    put("  T53p3 实测：弹窗 10 次循环无锁存=%s；主面板独立预览=%s、松开恢复=%s；"
+        "弹窗保持第二口径未泄漏=%s" % (latch_ok, dock_on, dock_off, pop_off))
+
     # 收尾：恢复默认，避免影响用户会话
     dock.panel.set_auto_close_popup(True)
     pop.hide()
+
+    # 14) T-54 关闭 Krita 时收掉弹窗（退出收尾三条钩子 + 最后一个主窗口 Close）
+    from PyQt5.QtGui import QCloseEvent
+    from PyQt5.QtWidgets import QMainWindow
+    _t54_pops = []
+    _t54_wins = []
+    ext._remove_quit_hooks()        # 干净起点（真实 createActions 可能已装过一次）
+    _attr_ok = pop.testAttribute(Qt.WA_QuitOnClose) is False
+    check("T54a 弹窗 WA_QuitOnClose=False（不参与 Qt「最后一个窗口」判定）",
+          _attr_ok, "attr=%s" % (pop.testAttribute(Qt.WA_QuitOnClose),))
+
+    ext._install_quit_hooks()
+    _t54_filter1 = getattr(ext, "_quit_filter", None)
+    ext._install_quit_hooks()       # 重复调用必须被标志挡住
+    _t54_filter2 = getattr(ext, "_quit_filter", None)
+    _t54_once = (getattr(ext, "_quit_hook_installed", False) is True
+                 and _t54_filter1 is not None and _t54_filter2 is _t54_filter1
+                 and getattr(ext, "_quit_notifier", None) is not None
+                 and getattr(ext, "_quit_app", None) is QApplication.instance())
+    check("T54b 退出收尾三条钩子只挂一次（对象不变、引用齐备）",
+          _t54_once,
+          "installed=%s filter_same=%s notifier=%s app=%s"
+          % (getattr(ext, "_quit_hook_installed", False), _t54_filter2 is _t54_filter1,
+             getattr(ext, "_quit_notifier", None) is not None,
+             getattr(ext, "_quit_app", None) is QApplication.instance()))
+
+    # 信号已连接/可断开：已连接时 disconnect 不抛，未连接时 PyQt 抛 TypeError
+    _sig_linked = {"app": False, "krita": False}
+    try:
+        QApplication.instance().aboutToQuit.disconnect(ext._close_popup_for_quit)
+        _sig_linked["app"] = True
+        QApplication.instance().aboutToQuit.connect(ext._close_popup_for_quit)
+    except Exception:
+        _sig_linked["app"] = False
+    try:
+        ext._quit_notifier.applicationClosing.disconnect(ext._close_popup_for_quit)
+        _sig_linked["krita"] = True
+        ext._quit_notifier.applicationClosing.connect(ext._close_popup_for_quit)
+    except Exception:
+        _sig_linked["krita"] = False
+    check("T54c applicationClosing 与 aboutToQuit 两条信号均已连接",
+          _sig_linked["app"] and _sig_linked["krita"], "%r" % (_sig_linked,))
+
+    def _hide_t54_wins():
+        for _w in _t54_wins:
+            try:
+                _w.hide()
+            except RuntimeError:
+                pass
+        QApplication.processEvents()
+
+    def _mk_pop54():
+        _p = hp.HsvPickerPopup(dock.panel)
+        _t54_pops.append(_p)
+        ext._popup = _p
+        _p.show()
+        QApplication.processEvents()
+        return _p
+
+    # 正例：唯一可见主窗口收到 Close -> 弹窗立即隐藏、扩展引用置空
+    _hide_t54_wins()
+    _p1 = _mk_pop54()
+    _w1 = QMainWindow()
+    _t54_wins.append(_w1)
+    _w1.show()
+    QApplication.processEvents()
+    QApplication.sendEvent(_w1, QCloseEvent())
+    _p1_vis, _p1_ref = _p1.isVisible(), ext._popup
+    check("T54d 最后一个可见主窗口收到 Close：弹窗立即收掉且引用置空",
+          (not _p1_vis) and _p1_ref is None,
+          "visible=%s ref=%r" % (_p1_vis, _p1_ref))
+
+    # 钩子可整体移除：移除后同样的 Close 不再收弹窗，两条信号也确实断开
+    _hide_t54_wins()
+    ext._remove_quit_hooks()
+    _p2 = _mk_pop54()
+    _w2 = QMainWindow()
+    _t54_wins.append(_w2)
+    _w2.show()
+    QApplication.processEvents()
+    QApplication.sendEvent(_w2, QCloseEvent())
+    _p2_vis, _p2_ref = _p2.isVisible(), ext._popup
+    _removed_ok = _p2_vis and _p2_ref is _p2
+    _sig_gone = {"app": False, "krita": False}
+    try:
+        QApplication.instance().aboutToQuit.disconnect(ext._close_popup_for_quit)
+    except TypeError:
+        _sig_gone["app"] = True
+    except Exception:
+        pass
+    try:
+        hp.Krita.instance().notifier().applicationClosing.disconnect(
+            ext._close_popup_for_quit)
+    except TypeError:
+        _sig_gone["krita"] = True
+    except Exception:
+        pass
+    try:
+        hp.Krita.instance().notifier().applicationClosing.emit()   # 移除期间也不该收
+    except Exception:
+        pass
+    _p2_vis2, _p2_ref2 = _p2.isVisible(), ext._popup
+    check("T54e 退出过滤器/信号可整体移除：移除后 Close 与 applicationClosing 均不收弹窗",
+          _removed_ok and _p2_vis2 and _p2_ref2 is _p2
+          and _sig_gone["app"] and _sig_gone["krita"],
+          "close_removed=%s visible=%s ref_is=%s disc=%r"
+          % (_removed_ok, _p2_vis2, _p2_ref2 is _p2, _sig_gone))
+
+    # 反例：两个可见主窗口关其一 -> 弹窗不受影响
+    ext._install_quit_hooks()       # 重新装回（与真实运行一致）
+    _hide_t54_wins()
+    _p3 = _mk_pop54()
+    _wa = QMainWindow()
+    _wb = QMainWindow()
+    _t54_wins.extend([_wa, _wb])
+    _wa.show()
+    _wb.show()
+    QApplication.processEvents()
+    QApplication.sendEvent(_wa, QCloseEvent())
+    _p3_vis, _p3_ref = _p3.isVisible(), ext._popup
+    check("T54f 两个可见主窗口关其一：弹窗不受影响",
+          _p3_vis and _p3_ref is _p3,
+          "visible=%s ref_is=%s wa_visible=%s wb_visible=%s"
+          % (_p3_vis, _p3_ref is _p3, _wa.isVisible(), _wb.isVisible()))
+
+    # applicationClosing 正例：信号触发同样收弹窗（钩子真实生效）
+    _hide_t54_wins()
+    _p4 = _mk_pop54()
+    try:
+        hp.Krita.instance().notifier().applicationClosing.emit()
+    except Exception:
+        pass
+    _p4_vis, _p4_ref = _p4.isVisible(), ext._popup
+    check("T54g applicationClosing 信号触发：弹窗收掉",
+          (not _p4_vis) and _p4_ref is None,
+          "visible=%s ref=%r" % (_p4_vis, _p4_ref))
+
+    # 回归：退出钩子在装状态下不影响弹窗 toggle 既有语义
+    _hide_t54_wins()
+    _p5 = _mk_pop54()
+    _p5.toggle()
+    _p5_off = not _p5.isVisible()
+    _p5.toggle()
+    _p5_on = _p5.isVisible() and ext._popup is _p5
+    _p5_attr = _p5.testAttribute(Qt.WA_QuitOnClose) is False   # setWindowFlags 后属性仍在
+    check("T54h 退出钩子不影响弹窗 toggle 既有语义（置顶/重设窗口标志后属性保持）",
+          _p5_off and _p5_on and _p5_attr,
+          "off=%s on=%s attr_false=%s" % (_p5_off, _p5_on, _p5_attr))
+
+    # T-54 收尾：移除退出过滤器、隐藏临时窗口与弹窗，避免污染后续用例
+    ext._remove_quit_hooks()
+    ext._popup = None
+    for _w in _t54_wins:
+        try:
+            _w.hide()
+        except Exception:
+            pass
+    for _p in _t54_pops:
+        try:
+            _p.hide()
+        except Exception:
+            pass
+    QApplication.processEvents()
+    for _p in _t54_pops:
+        try:
+            _p.deleteLater()
+        except Exception:
+            pass
+    QApplication.processEvents()
+    put("  T54 实测：WA_QuitOnClose=False 断言=%s；三钩子只挂一次=%s；唯一主窗口 Close 收弹窗=%s；"
+        "移除后 Close 不收=%s、applicationClosing 不收=%s；双主窗口不误收=%s；"
+        "applicationClosing 正例收弹窗=%s；toggle 回归=%s"
+        % (_attr_ok, _t54_once, (not _p1_vis), _removed_ok,
+           _p2_vis2, _p3_vis, (not _p4_vis), (_p5_off and _p5_on)))
 
     put("")
     put("=" * 56)

@@ -5,12 +5,17 @@
 几何：方块半边长 = 短边 × 0.286，环内半径 = 方块半边长 × √2（方块四角顶内圈）。
 Qt5：鼠标坐标用 event.localPos()。
 
-交互（v4：动作由**自定义按键表** keymap_core 决定，见「按键功能」对话框；默认值 v7 R23）：
-  · 环上：默认左键 = 绝对角度转色相 + 锁明度 + 锁**相对彩度 C_rel**；中键 / 右键 =
-    绝对角度 + 锁明度 + 锁绝对彩度 C，目标色相够不到 C 时把色相
-    **钳到最近的可达边界**；Shift+左键 = 纯 HSV（只改色相，S / V 原样不动）
-  · 方块内：左键绝对定位；中键默认改明度（相对）、右键默认改彩度（相对）；
-    Shift+左键 = 只改 S、Alt+左键 = 只改 V（都是键表里的默认输入行）
+交互（动作由**自定义按键表** keymap_core + 设置「临时切换键」决定；默认值 T-53）：
+  · 环上：左 / 中 / 右键 = 绝对角度转色相 + 锁明度 + 锁**当前口径** C；
+    Ctrl+左键 = 纯 HSV（只改色相，S / V 原样不动）；目标色相够不到 C 时把色相
+    **钳到最近的可达边界**
+  · 方块内：左键 = 点哪到哪；中键 = 沿明度轨迹相对改明度（锁当前口径 C）；
+    右键 = 沿等明度线相对改彩度（锁明度）；s_only / v_only 仍可选、默认不绑定
+  · 临时切换键（默认 Shift，设置「C 条选项 → 临时切换键」）：按住再按基础行
+    = 同一动作锁另一口径；精确键表行优先，不自动翻转
+  · 彩度口径（面板「C 条选项」）：无修饰用持久口径（rel/abs），临时键用另一口径；
+    生效口径同时决定蓝过点线、彩度线簇、锁彩度约束与 C 条/数值框显示；
+    绝对 C 线簇密度 even=纯色 C_max(h) 等分 9 档 / fixed=0.02~0.36
   · 键表把「修饰键 + 鼠标键」映射到动作；没配的修饰键组合落回该键的「无修饰」行
 """
 
@@ -79,6 +84,11 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
         self.s = 1.0
         self.v = 1.0
         self.metric = "oklab"
+        self.chroma_mode = "rel"           # 持久彩度口径：rel=C_rel（默认）/ abs=绝对 C
+        self.temp_chroma_mode = None       # 临时口径（None/rel/abs）：按下 *_other 动作、自动翻转或悬停预览时切换
+        self.temp_chroma_key = "shift"     # 全局「临时切换键」（MOD_ID；none = 不自动翻转）
+        self._press_temp_mode = None       # 按下瞬间的临时口径快照：不锁彩度的动作整段保持
+        self.abs_cluster_mode = "fixed"    # 绝对 C 线簇密度：fixed=0.02~0.36（默认）/ even=纯色 C_max 等分
         self.show_clusters = True
         self.show_lines = True
         self.show_unreachable = True       # 色环「不可达色相」细斜纹（只画线、不填灰底；默认开）
@@ -136,6 +146,66 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
             self._clear_frozen_lines()      # R27：不留旧口径的冻结过点线
             self.update()
 
+    def set_chroma_mode(self, mode):
+        """设置**持久**彩度口径（跟随面板「C 条选项」）：rel = 相对 C_rel（默认）/ abs = 绝对 C。
+
+        口径只影响三处：蓝过点线、彩度线簇、方块内「锁彩度」约束；切换时旧口径的
+        缓存与冻结线快照必须清掉，否则会把上一种口径的线留在画面上。幂等调用直接返回。
+        """
+        mode = "abs" if str(mode) == "abs" else "rel"
+        if mode == self.chroma_mode:
+            return
+        self.chroma_mode = mode
+        self._through_cache = None
+        self._through_key = None
+        self._invalidate_clusters()
+        self._clear_frozen_lines()
+        self.update()
+
+    def set_abs_cluster_mode(self, mode):
+        """绝对 C 线簇密度：fixed = 0.02~0.36 共 18 档（默认）/ even = 纯色 C_max 等分 9 档。"""
+        mode = "even" if str(mode) == "even" else "fixed"
+        if mode == self.abs_cluster_mode:
+            return
+        self.abs_cluster_mode = mode
+        self._invalidate_clusters()
+        self.update()
+
+    def effective_chroma_mode(self):
+        """当前生效口径：临时口径优先，否则用持久口径。"""
+        return self.temp_chroma_mode or self.chroma_mode
+
+    def _other_chroma_mode(self):
+        """持久口径的反面（供 *_other 动作解析临时口径）。"""
+        return "abs" if self.chroma_mode == "rel" else "rel"
+
+    def set_temp_chroma_key(self, key):
+        """设置全局「临时切换键」：MOD_ID（none/shift/ctrl/...）；非法值回落 shift。"""
+        key = str(key)
+        self.temp_chroma_key = key if key in kmc.MOD_IDS else "shift"
+
+    def set_temp_chroma_mode(self, mode):
+        """设置**临时**口径：None / "rel" / "abs"。
+
+        只改「锁哪个口径 + C 条/数值框/线簇显示哪个口径」，不改拖动方式；
+        不写设置、不广播，松手由 mouseReleaseEvent 清回 None。切换时清缓存与冻结线；
+        若当前处于锁彩度状态，按新口径重取一次目标值。
+        """
+        mode = None if mode is None else ("abs" if str(mode) == "abs" else "rel")
+        if mode == self.temp_chroma_mode:
+            return
+        self.temp_chroma_mode = mode
+        self._through_cache = None
+        self._through_key = None
+        self._invalidate_clusters()
+        self._clear_frozen_lines()
+        if self.lock_c:
+            self.target_crel = self.locked_crel()
+            self.target_cabs = self.locked_cabs()
+        if self.lock_l:
+            self.target_l = self.locked_lightness()
+        self.update()
+
     def set_color(self, h, s, v):
         """设定颜色。s≈0（灰轴）时保留上一次的色相，避免"拖到 S=0 色相归零"。"""
         s = mc.clamp(float(s), 0.0, 1.0)
@@ -158,7 +228,11 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
         self._refresh_locks()
 
     def _refresh_locks(self):
-        """生效锁 = 复选框锁 OR 中/右键临时锁；并刷新锁定目标值。"""
+        """生效锁 = 复选框锁 OR 中/右键临时锁；并刷新锁定目标值。
+
+        锁彩度时两种口径都记录：rel 模式约束用 target_crel，abs 模式约束用 target_cabs；
+        这样切换 C 条口径后约束目标不会丢。
+        """
         new_l = bool(self.chk_l or self.btn_l)
         new_c = bool(self.chk_c or self.btn_c)
         if new_l and not self.lock_l:
@@ -167,8 +241,10 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
             self.target_l = None
         if new_c and not self.lock_c:
             self.target_crel = self.locked_crel()
+            self.target_cabs = self.locked_cabs()
         if not new_c:
             self.target_crel = None
+            self.target_cabs = None
         self.lock_l, self.lock_c = new_l, new_c
         self.update()
 
@@ -197,11 +273,19 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
         i = int(np.argmin((pts[:, 0] - px) ** 2 + (pts[:, 1] - py) ** 2))
         self.s = mc.clamp(float(curve[i, 0]), 0.0, 1.0)
         self.v = mc.clamp(float(curve[i, 1]), 0.0, 1.0)
-        # 精修：锁彩度时固定 V 二分求精确 S（与 Tkinter 版同口径）
-        if self.lock_c and not self.lock_l and self.target_crel is not None:
+        # 精修：锁彩度时按**生效口径**固定 V 求精确 S（rel=C_rel / abs=绝对 C）
+        if self.lock_c and not self.lock_l:
             try:
-                self.s = mc.clamp(float(mc.solve_s_crel_scalar(
-                    self.h, self.metric, self.v, self.target_crel)), 0.0, 1.0)
+                if self.effective_chroma_mode() == "abs" and self.target_cabs is not None:
+                    s_fix = float(mc.solve_s_cabs_scalar(
+                        self.h, self.v, self.target_cabs))
+                elif self.target_crel is not None:
+                    s_fix = float(mc.solve_s_crel_scalar(
+                        self.h, self.metric, self.v, self.target_crel))
+                else:
+                    s_fix = float("nan")
+                if s_fix == s_fix:          # 不可达（NaN）时保留最近点投影
+                    self.s = mc.clamp(s_fix, 0.0, 1.0)
             except Exception:
                 pass
 
@@ -277,10 +361,11 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
         super().resizeEvent(event)
 
     def _clusters(self):
-        """两族线簇；按色相 10° 桶 + 边长 + 指标缓存。返回 dict。"""
+        """两族线簇；按色相 10° 桶 + 边长 + 指标 + 生效口径 + 绝对 C 密度缓存。"""
         g = self._geometry()
         key = (round(self.h / CLUSTER_HUE_BUCKET) * CLUSTER_HUE_BUCKET,
-               int(round(g["half_sq"] * 2.0)), self.metric)
+               int(round(g["half_sq"] * 2.0)), self.metric,
+               self.effective_chroma_mode(), self.abs_cluster_mode)
         if self._cluster_cache is not None and self._cluster_cache_key == key:
             return self._cluster_cache
         hue = float(self.h)
@@ -295,10 +380,20 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
         except Exception:
             pass
         try:
-            ax, rel = mc.crel_field(hue, self.metric, n=41)
-            for i, (ss, vv) in enumerate(mc.crel_isoline_many(ax, rel, targets)):
-                if len(ss) >= 2:
-                    data["crel"].append((float(targets[i]), ss, vv))
+            if self.effective_chroma_mode() == "abs":
+                # 绝对口径线簇（与「C 条满量程」无关）：
+                # even = 纯色 C_max(h) 的 10%~90% 共 9 档；fixed = 0.02~0.36 共 18 档。
+                ab_targets = np.asarray(mc.cabs_cluster_targets(hue, self.abs_cluster_mode),
+                                        dtype=np.float64)
+                ax, cg = mc.cabs_field(hue, n=41)
+                for i, (ss, vv) in enumerate(mc.cabs_isoline_many(ax, cg, ab_targets)):
+                    if len(ss) >= 2:
+                        data["crel"].append((float(ab_targets[i]), ss, vv))
+            else:
+                ax, rel = mc.crel_field(hue, self.metric, n=41)
+                for i, (ss, vv) in enumerate(mc.crel_isoline_many(ax, rel, targets)):
+                    if len(ss) >= 2:
+                        data["crel"].append((float(targets[i]), ss, vv))
         except Exception:
             pass
         self._cluster_cache = data
@@ -318,9 +413,19 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
                     order = np.argsort(vv)
                     vv = vv[order]
                     ss = ss[order]
+            elif self.effective_chroma_mode() == "abs":
+                tgt = self.target_cabs if self.target_cabs is not None \
+                    else self.locked_cabs()
+                # 完整等绝对 C 线：带 S=1 边下端点和当前 V，保证锚点/拖动不瞬移
+                got = mc.cabs_iso_curve(self.h, tgt, n_v=121, iters=26,
+                                        v_extra=self.v)
+                if got is None:
+                    return None
+                ss, vv = got
             else:
-                tgt = self.target_crel if self.target_crel is not None else self.locked_crel()
                 v = np.linspace(0.005, 0.995, 121)
+                tgt = self.target_crel if self.target_crel is not None \
+                    else self.locked_crel()
                 s = mc.solve_s_at_crel(self.h, self.metric, v, tgt)
                 ok = np.isfinite(s)
                 if not np.any(ok):
@@ -433,7 +538,8 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
         if frozen_iso is not None or frozen_crel is not None:
             return {"iso": frozen_iso if frozen_iso is not None else self._iso_line_now(),
                     "crel": frozen_crel if frozen_crel is not None else self._crel_line_now()}
-        key = (round(self.h, 2), round(self.s, 5), round(self.v, 5), self.metric)
+        key = (round(self.h, 2), round(self.s, 5), round(self.v, 5),
+               self.metric, self.effective_chroma_mode())
         if self._through_cache is not None and self._through_key == key:
             return self._through_cache
         out = {"iso": self._iso_line_now(), "crel": self._crel_line_now()}
@@ -453,11 +559,22 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
         return None
 
     def _crel_line_now(self):
-        """蓝线 = 等 C_rel 线（明度 0~100 轨迹线）；显示用采样。"""
+        """蓝线 = 等彩度线（明度轨迹线）；生效口径 rel = 等 C_rel、abs = 等绝对 C。"""
         try:
-            crel = float(mc.crel_of_xyz(self.h, self.metric, self.s, self.v)[0])
+            if self.effective_chroma_mode() == "abs":
+                target = float(mc.ok_L_C(self.h, self.s, self.v)[1])
+                # 完整等绝对 C 线：补 S=1 边下端点与当前色点的 V，折线严格过当前点
+                got = mc.cabs_iso_curve(self.h, target, n_v=33, iters=26,
+                                        v_extra=self.v)
+                if got is None:
+                    return None
+                ss, vv = mc.filter_crel_line(self.h, self.metric, got[0], got[1])
+                if len(ss) >= 2:
+                    return (ss, vv)
+                return None
             v = np.linspace(0.005, 0.995, 33)
-            s = mc.solve_s_at_crel(self.h, self.metric, v, crel, iters=10)
+            target = float(mc.crel_of_xyz(self.h, self.metric, self.s, self.v)[0])
+            s = mc.solve_s_at_crel(self.h, self.metric, v, target, iters=10)
             ok = np.isfinite(s)
             if int(ok.sum()) >= 2:
                 ss, vv = mc.filter_crel_line(self.h, self.metric,
@@ -495,70 +612,145 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
             return "right"
         return "left"
 
-    def _lookup_action(self, area, btn, mods):
-        """(区域, 鼠标键, Qt 修饰键位) -> 动作 id（未知组合落回无修饰行）。"""
+    def _resolve_action(self, area, btn, mods):
+        """(区域, 鼠标键, Qt 修饰键位) -> (动作 id, 是否自动翻转临时口径)。
+
+        1) 键表里存在当前修饰键的精确行 -> 用该行，不自动翻转；
+        2) 否则当前修饰键包含全局「临时切换键」-> 去掉该键查基础行，命中则动作 + 翻转；
+        3) 其余按 lookup 的落回顺序（含该鼠标键的无修饰行）。
+        """
+        btn_id = self._btn_id(btn)
         mod = kmc.mods_from_bools(bool(mods & Qt.ShiftModifier),
                                   bool(mods & Qt.ControlModifier),
                                   bool(mods & Qt.AltModifier),
                                   bool(mods & _UNKNOWN_QT_MODS))
-        return kmc.lookup(self.keymap, area, self._btn_id(btn), mod)
+        if mod is not None:
+            act = kmc.find_action(self.keymap, area, btn_id, mod)
+            if act is not None:
+                return act, False
+            temp_key = getattr(self, "temp_chroma_key", "shift")
+            if kmc.mod_contains(mod, temp_key):
+                base = kmc.find_action(self.keymap, area, btn_id,
+                                       kmc.mod_remove(mod, temp_key))
+                if base is not None and base != "none":
+                    return base, True
+        return kmc.lookup(self.keymap, area, btn_id, mod), False
+
+    def _lookup_action(self, area, btn, mods):
+        """仅取动作 id（兼容旧调用）；自动翻转由 `_resolve_action` 返回。"""
+        return self._resolve_action(area, btn, mods)[0]
+
+    def _flip_chroma_mode(self, action):
+        """自动翻转后临时采用的口径；不锁彩度的动作返回 None（忽略翻转）。"""
+        if action == "hue_lock_lc_abs":
+            return "rel"
+        if action == "hue_lock_lc_rel":
+            return "abs"
+        if action in ("rel_l", "rel_c", "hue_lock_lc_cur", "abs_lock_c"):
+            return self._other_chroma_mode()
+        return None
+
+    def _keep_press_temp_mode(self):
+        """不锁彩度的动作（abs / s_only / v_only / hue_hsv / 未知兜底）：
+
+        整段拖动保持按下瞬间的临时口径（悬停预览口径），不得清成持久口径。
+        """
+        self.set_temp_chroma_mode(getattr(self, "_press_temp_mode", None))
 
     # ---- 环上动作（R15：除「无」外都是绝对角度，点击即到位）----
-    def _begin_ring_action(self, action, pos):
-        if action == "none":
-            return False
-        hue = rd.hue_from_pos(self._geometry(), pos.x(), pos.y()) % 360.0
-        if action == "hue_hsv":
-            self._drag_mode = "ring_hue_hsv"
-            self.h = hue
-        elif action == "hue_lock_lc_rel":
+    def _begin_ring_locked(self, hue):
+        """环上彩度锁定动作：按**生效口径**决定锁 C_rel 还是绝对 C。"""
+        self.target_l = self.locked_lightness()
+        if self.effective_chroma_mode() == "rel":
             self._drag_mode = "ring_crel"
-            self.target_l = self.locked_lightness()
             self.target_crel = self.locked_crel()
-            self.h = hue
+            self.h = float(hue) % 360.0
             self._apply_ring_lc_rel(hue)
-        else:                                   # hue_lock_lc_abs（未知动作也兜底到它）
+        else:
             self._drag_mode = "ring_lc"
-            self.target_l = self.locked_lightness()
             self.target_cabs = self.locked_cabs()
             self._apply_ring_lc(hue)
+
+    def _begin_ring_action(self, action, pos, flip=False):
+        if action == "none":
+            return False
+        flip_mode = self._flip_chroma_mode(action) if flip else None
+        hue = rd.hue_from_pos(self._geometry(), pos.x(), pos.y()) % 360.0
+        if action == "hue_hsv":
+            self._keep_press_temp_mode()      # 纯 HSV 不锁彩度：保持按下瞬间的悬停口径
+            self._drag_mode = "ring_hue_hsv"
+            self.h = hue
+        elif action == "hue_lock_lc_cur":
+            self.set_temp_chroma_mode(flip_mode)
+            self._begin_ring_locked(hue)
+        elif action == "hue_lock_lc_other":
+            self.set_temp_chroma_mode(self._other_chroma_mode())
+            self._begin_ring_locked(hue)
+        elif action == "hue_lock_lc_abs":
+            self.set_temp_chroma_mode("abs")
+            self._begin_ring_locked(hue)
+        elif action == "hue_lock_lc_rel":
+            self.set_temp_chroma_mode("rel")
+            self._begin_ring_locked(hue)
+        else:                       # 未知动作：按当前口径锁 L + C（最接近新默认）
+            self._keep_press_temp_mode()      # 不锁彩度：保持按下瞬间的悬停口径
+            self._begin_ring_locked(hue)
         return True
 
     # ---- 方块内动作 ----
-    def _begin_square_action(self, action, pos):
+    def _begin_square_action(self, action, pos, flip=False):
         if action == "none":
             return False
+        flip_mode = self._flip_chroma_mode(action) if flip else None
         if action == "abs":
+            self._keep_press_temp_mode()      # 点哪到哪不锁彩度：保持按下瞬间的悬停口径
             self._drag_mode = "absolute"
             self._apply_absolute_locked(pos, "square")
             self._reanchor()
         elif action == "abs_lock_l":
+            self.set_temp_chroma_mode(None)
             self._drag_mode = "absolute"
             self.btn_l = True
             self._refresh_locks()
             self._apply_absolute_locked(pos, "square")
             self._reanchor()
         elif action == "abs_lock_c":
+            self.set_temp_chroma_mode(flip_mode)
             self._drag_mode = "absolute"
             self.btn_c = True
             self._refresh_locks()
             self._apply_absolute_locked(pos, "square")
             self._reanchor()
-        elif action == "rel_l":                 # 改明度（相对，锁 C_rel，沿明度轨迹线）
+        elif action == "rel_l":         # 改明度（锁当前口径 C，沿明度轨迹线相对拖动）
+            self.set_temp_chroma_mode(flip_mode)
             self._drag_mode = "rel_right"
             self.btn_c = True
             self._refresh_locks()
-        elif action == "rel_c":                 # 改彩度（相对，锁明度，沿彩度轨迹线）
+        elif action == "rel_l_other":   # 改明度（锁另一口径 C，手感不变）
+            self.set_temp_chroma_mode(self._other_chroma_mode())
+            self._drag_mode = "rel_right"
+            self.btn_c = True
+            self._refresh_locks()
+        elif action == "rel_c":         # 改彩度（锁明度，沿彩度轨迹线相对拖动）
+            self.set_temp_chroma_mode(flip_mode)
+            self._drag_mode = "rel_mid"
+            self.btn_l = True
+            self._refresh_locks()
+        elif action == "rel_c_other":   # 改彩度（锁明度；C 读数/线簇临时按另一口径）
+            self.set_temp_chroma_mode(self._other_chroma_mode())
             self._drag_mode = "rel_mid"
             self.btn_l = True
             self._refresh_locks()
         elif action == "s_only":
+            self._keep_press_temp_mode()      # 只改 S 不锁彩度：保持按下瞬间的悬停口径
             self._drag_mode = "axis"
             self._axis_lock = "s"
         elif action == "v_only":
+            self._keep_press_temp_mode()      # 只改 V 不锁彩度：保持按下瞬间的悬停口径
             self._drag_mode = "axis"
             self._axis_lock = "v"
-        else:                                   # 未知动作：退化为绝对定位
+        else:                           # 未知动作：退化为点哪到哪
+            self._keep_press_temp_mode()      # 不锁彩度：保持按下瞬间的悬停口径
             self._drag_mode = "absolute"
             self._apply_absolute_locked(pos, "square")
             self._reanchor()
@@ -579,11 +771,12 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
         self.v = mc.clamp(float(got[1]), 0.0, 1.0)
 
     def _reanchor(self):
-        """松手重锚定：锁明度 -> 目标改当前明度；锁彩度 -> 目标改当前 C_rel。"""
+        """松手重锚定：锁明度 -> 目标改当前明度；锁彩度 -> 目标改当前口径的彩度。"""
         if self.lock_l:
             self.target_l = self.locked_lightness()
         if self.lock_c:
             self.target_crel = self.locked_crel()
+            self.target_cabs = self.locked_cabs()
 
     def _to_px(self, ss, vv, g):
         x0, y0 = g["sq"][0], g["sq"][1]
@@ -704,17 +897,22 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
                      v=round(self.v, 6), lock_l=int(self.lock_l), lock_c=int(self.lock_c),
                      mods=int(mods))
 
+        # T-53 返工：先记下按下瞬间的临时口径（悬停预览可能正开着）；
+        # 不锁彩度的动作（abs/s_only/v_only/hue_hsv/未知）整段保持它，其余动作按各自口径重设。
+        self._press_temp_mode = self.temp_chroma_mode
+        # T-51：新一次按下先清掉上次残留的临时口径；动作解析时再按需设置
+        self.set_temp_chroma_mode(None)
         # R14：动作由自定义按键表决定；左键先清掉中/右键留下的临时锁
         if btn == Qt.LeftButton:
             self.btn_l = False
             self.btn_c = False
             self.target_cabs = None
             self._refresh_locks()
-        action = self._lookup_action(area, btn, mods)
+        action, flip = self._resolve_action(area, btn, mods)
         if area == "ring":
-            started = self._begin_ring_action(action, pos)
+            started = self._begin_ring_action(action, pos, flip)
         else:
-            started = self._begin_square_action(action, pos)
+            started = self._begin_square_action(action, pos, flip)
         if not started:
             self._drag_mode = None
             self._clear_frozen_lines()
@@ -850,6 +1048,16 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
         py = float(np.interp(t_new, cum, pts[:, 1]))
         self.s = mc.clamp((px - g["sq"][0]) / w, 0.0, 1.0)
         self.v = mc.clamp(1.0 - (py - g["sq"][1]) / w, 0.0, 1.0)
+        # abs 口径锁彩度：折线弧长取点会带来 ~1e-4 的 C 漂移，按当前 V 再二分精修 S，
+        # 保证拖动全程严格落在等绝对 C 线上；rel 口径路径一字不动（逐位兼容）。
+        if self.effective_chroma_mode() == "abs" and self.lock_c and not self.lock_l \
+                and self.target_cabs is not None:
+            try:
+                s_fix = float(mc.solve_s_cabs_scalar(self.h, self.v, self.target_cabs))
+                if s_fix == s_fix:
+                    self.s = mc.clamp(s_fix, 0.0, 1.0)
+            except Exception:
+                pass
 
     def mouseReleaseEvent(self, event):
         if self._drag_mode is None:
@@ -858,6 +1066,8 @@ interaction_started / interaction_finished：面板用来标记一次拾色操�
         if self._drag_mode in ("rel_mid", "rel_right", "absolute",
                                "ring_hue_hsv", "ring_crel", "ring_lc"):
             self._reanchor()
+        # T-51：临时口径只服务于本次拖动；松手立即清回持久口径（不写设置、不广播）
+        self.set_temp_chroma_mode(None)
         # 临时锁只服务于本次拖动：松手后一律清掉
         self.btn_l = False
         self.btn_c = False

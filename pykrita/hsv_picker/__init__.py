@@ -3,7 +3,7 @@ import sys
 import tempfile
 import traceback
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 # 随插件自带的 numpy：先把 vendor/ 加进 sys.path 并**完整**导入一次。
 # Krita 5.3.3 的内嵌 Python 3.13 没有 numpy，.desktop 里也不能声明该依赖。

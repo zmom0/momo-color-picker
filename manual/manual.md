@@ -35,16 +35,20 @@
 
 #### 色相环
 
-- 左键拖：转色相，同时锁明度 L 和相对彩度 C_rel，浓淡比例不变（默认）。
-- 中键 / 右键拖：转色相，同时锁明度 L 和绝对彩度 C；目标色相够不到时，颜色停在角度最近的可达边界。
-- Shift+左键拖：只改色相，S / V 保持原样（纯 HSV）。
-- 所有操作都可以自定义快捷键
+- 左键 / 中键 / 右键拖：转色相 + 锁明度 L + 锁当前彩度口径。
+- 目标色相够不到时，颜色停在角度最近的可达边界。
+- 按住临时切换键再拖：锁另一种彩度口径，松开恢复。
+- Ctrl+左键拖：只改色相，S / V 不动（纯 HSV）。
+- 操作可在 **设置 → 按键功能…** 里自定义。
 
 #### S/V 方块
 
 - 左键：点到哪就是哪个颜色。
-- 中键：沿明度轨迹改明度（锁 C_rel）；右键：沿等明度线改彩度（锁明度 L）。
-- 方块内按 HSV 操作：Shift+左键只改 S，Alt+左键只改 V。
+- 中键：沿明度轨迹改明度，锁当前彩度口径。
+- 右键：沿等明度线改彩度，锁明度 L。
+- 按住临时切换键再拖中 / 右键：相对拖动方式不变，彩度锁另一种口径。
+- 临时期间 C 条、数值框、线簇同步切换，松开恢复。
+- 只改 S / 只改 V 动作保留可选，默认不绑定。
 
 #### 色相环的不可达色相
 
@@ -69,7 +73,9 @@
 - 四条横向色条左边是 0，按住左键拖动即可改该条的分量。
 - 数值框单击编辑文本，可输入或粘贴；H / S / V 三个框还可以按住左键上下拖动连续调值。
 - H / S / V 拖动倍率：默认 ×1、`Ctrl` ×2、`Ctrl+Shift` ×4、`Alt` ×0.5。
-- HEX 与 L / C / a / b 数值框只能输入和粘贴，不能拖动调值。
+- H / S / V 三个框等宽，面板变窄时一起收缩；文本**始终完整**（H/S/V 两位小数、HEX `#RRGGBB`），不会自动变成 1 位 / 整数，也不显示省略号。宽度不足时框内改为左对齐、显示停在文本开头（优先看到整数部分），放得下时恢复右对齐。
+- 宽度足够显示全部数字后，这些框不再继续变宽，多出来的宽度留给 HEX 右边的当前色块。
+- 单击即可编辑完整数值；HEX 与 L / C / a / b 数值框只能输入和粘贴，不能拖动调值。
 
 ### 默认键位与自定义按键表
 
@@ -77,17 +83,23 @@
 
 ![按键功能对话框](manual/images/05-keymap.png)
 
-打开 **设置 → 按键功能…**，给左键、中键、右键分别搭配 8 种修饰键组合（无、Shift、Ctrl、Alt、Ctrl+Shift、Shift+Alt、Ctrl+Alt、Ctrl+Shift+Alt），选好区域、输入和动作后立即生效并保存。
+打开 **设置 → 按键功能…**，选区域、输入（鼠标键 + 8 种修饰键组合）和动作，保存即生效。
 
-- 同一区域里重复的输入组合会被拒绝。
-- 底部「恢复默认」可以还原默认键位；已保存的自定义键位不会被升级覆盖，想用新版默认键位需要点一次「恢复默认」。
+- 同区域重复输入会被拒绝。
+- 「恢复默认」还原默认键位；升级不会覆盖已保存的自定义键位。
+- 没有单独配置的组合，沿用该鼠标键的「无」行。
 
-修改立即在所有面板生效，不需要重启 Krita；没有单独配置的组合会沿用该鼠标键的「无」行动作。
+临时切换键在 **设置 → C 条选项 → 临时切换键** 里改（默认 `Shift`；支持 Ctrl / Alt / 组合键 / 无）。
+
+按住临时切换键 + 鼠标在面板内：立即预览另一口径（蓝过点线、线簇、C 条、C 数值框同步）。
+松开按键或移出面板：立即恢复持久口径，不改设置。
+按住临时切换键再按方块中 / 右键、环左 / 中 / 右键：基础动作临时锁另一口径，松开恢复。
+精确配置的输入行优先，不做自动翻转。
 
 | 区域 | 可用输入 | 默认键位 |
 |---|---|---|
-| 色相环 | 8 种修饰键组合，各配左键、中键、右键 | 左键 = 转色相 + 锁明度 L + 锁相对彩度 C_rel；<br>中键 / 右键 = 转色相 + 锁明度 L + 锁绝对彩度 C；<br>Shift+左键 = 只改色相（纯 HSV） |
-| S/V 方块 | 8 种修饰键组合，各配左键、中键、右键 | 左键 = 绝对定位；<br>中键 = 沿明度轨迹改明度（锁 C_rel）；<br>右键 = 沿等明度线改彩度（锁 L）；<br>Shift+左键 = 只改 S；<br>Alt+左键 = 只改 V |
+| 色相环 | 8 种修饰键组合，各配左键、中键、右键 | 左 / 中 / 右键 = 转色相 + 锁 L + 锁当前彩度口径；<br>Ctrl+左键 = 只改色相（纯 HSV）；<br>临时切换键 + 左 / 中 / 右键 = 锁另一种彩度口径 |
+| S/V 方块 | 8 种修饰键组合，各配左键、中键、右键 | 左键 = 点到哪就是哪个颜色；<br>中键 = 改明度（锁当前彩度口径）；<br>右键 = 改彩度（锁 L）；<br>临时切换键 + 中 / 右键 = 锁另一种彩度口径；<br>只改 S / 只改 V 动作保留可选 |
 | L / C / a / b 色条 | 8 种修饰键组合，各配左键、中键、右键 | 左键拖动 = 改该条分量；<br>a、b 条只改本分量，明度与另一分量不动 |
 | 数值框 | 8 种修饰键组合，各配左键、中键、右键 | 仅 H / S / V 三个框可拖动调值：左键 ×1；<br>Ctrl+左键 ×2；<br>Ctrl+Shift+左键 ×4；<br>Alt+左键 ×0.5；单击编辑文本 |
 
@@ -135,19 +147,21 @@
 
 ![设置菜单与三个子菜单](manual/images/09-settings.png)
 
-点击「设置」按钮展开菜单，逐项打开或切换。图中三个子菜单都已展开：C 条选项 = 相对彩度 C_rel（默认）/ 绝对彩度 C；明度标准 = Oklab L（感知明度，默认）/ 灰阶（色彩校样）；浮层选项 = 关闭 / 1 秒 / 2 秒 / 悬停（默认）/ 一直。
+点击「设置」按钮展开菜单，逐项打开或切换。图中三个子菜单都已展开：C 条选项 = 相对 / 绝对口径、绝对 C 线簇、临时切换键；明度标准 = Oklab L（默认）/ 灰阶；浮层选项 = 关闭 / 1 秒 / 2 秒 / 悬停（默认）/ 一直。
 
 所有设置立即生效；Docker 面板与弹窗共享同一份设置。
 
 | 设置项 | 作用 |
 |---|---|
-| 显示明度/彩度线簇 | 显示两族辅助线：等明度、等相对彩度各 9 条（默认开） |
-| 显示明度/彩度线 | 显示红色等明度线与蓝色等相对彩度线（默认开） |
+| 显示明度/彩度线簇 | 显示两族辅助线：等明度线 9 条；等彩度线相对口径 C_rel = 0.1~0.9、绝对口径默认固定 0.02~0.36 共 18 档（可勾选「按色相等分」切成 9 档） |
+| 显示明度/彩度线 | 显示红色等明度线与蓝色等彩度线；蓝线口径跟随当前生效口径（悬停/临时切换期间也跟随） |
 | 显示不可达色相提示 | 在够不到的色相段叠加灰色斜纹（默认开） |
 | 显示 Oklab a/b 分量条 | 显示或收起 a、b 两条色条（默认显示） |
 | a/b 条满量程 | 不勾（默认）：刻度只随明度变，越界段灰色斜纹、拖到底即停；勾选：每段都可达，刻度随另一分量变 |
-| C 条选项 | 相对彩度 C_rel（默认，0~1）或绝对彩度 C |
-| C 条满量程 | 仅绝对彩度生效：不勾（默认）固定 0~0.4；勾选后 0~当前明度与色相下的最大彩度 |
+| C 条选项 | 相对彩度 C_rel（默认，0~1）或绝对彩度 C；切绝对后蓝过点线、彩度线簇与方块中键锁的彩度同步改用绝对 C |
+| 绝对 C 线簇按色相等分 | 默认不勾：绝对口径线簇 = 固定 0.02~0.36 步长 0.02 共 18 档（够不到的明度段不画）；勾选 = 当前色相纯色 C_max(h) 的 10%~90% 共 9 档 |
+| C 条满量程 | 仅绝对彩度生效：不勾（默认）固定 0~0.4；勾选后 0~当前明度与色相下的最大彩度；只影响 C 条量程，不影响线簇档位 |
+| 临时切换键 | 按住即时预览另一彩度口径，按基础动作时临时锁另一口径；默认 `Shift`，可选 Ctrl / Alt / 组合键 / 无 |
 | 明度标准 | Oklab L（感知明度，默认）或灰阶（色彩校样） |
 | 浮层选项 | 关闭 / 1 秒 / 2 秒 / 悬停（默认）/ 一直 |
 | 按键功能… | 打开自定义按键表 |
@@ -304,7 +318,7 @@
 
 ### 轨迹线、线簇与锁定
 
-- **红色等明度线**：固定明度，颜色在 S/V 与 C/H 里的运行轨迹；**蓝色等相对彩度线**：固定相对彩度的比例线。
+- **红色等明度线**：固定明度，颜色在 S/V 与 C/H 里的运行轨迹；**蓝色等彩度线**：固定彩度的轨迹线，口径跟随当前生效口径（相对 = C_rel，绝对 = 绝对 C；临时切换期间也跟随）。
 - **线簇**：10%~90% 的两族虚线，只作视觉参考，可在设置里关掉。
 - **锁定**：锁 L 固定感知明度，锁 C_rel 固定浓淡比例，锁绝对 C 固定到灰轴的距离；锁定时一条轨迹线冻结，另一条继续实时更新。
 - a、b 条拖动期间两条线都实时。
@@ -383,18 +397,22 @@ The ring sets the hue and the square in the middle sets saturation and value, wi
 
 On the ring, 0° red is at 9 o'clock and the angle increases clockwise.
 
-- Left-drag: rotate the hue while locking lightness L and relative chroma C_rel, keeping the saturation ratio the same (default).
-- Middle / right-drag: rotate the hue while locking lightness L and absolute chroma C; if the target hue cannot reach that chroma, the color stops at the angularly nearest reachable boundary.
-- Shift+left-drag: change the hue only, keeping S and V as they are (plain HSV).
-- Every action here can be reassigned to another mouse button or modifier combination.
+- Left / middle / right-drag: rotate the hue + lock lightness L + lock the current chroma scale.
+- If the target hue cannot reach that chroma, the color stops at the angularly nearest reachable boundary.
+- Hold the temporary switch key and drag: lock the other chroma scale; release to restore.
+- Ctrl+left-drag: change the hue only, keeping S and V as they are (plain HSV).
+- Every action can be reassigned in **Settings > Key functions...**.
 
 ##### SV square
 
 The square's corners touch the ring's inner circle, so the four gaps between them also work like the ring.
 
 - Left button: the color under the pointer.
-- Middle button: change lightness along its trajectory (locks C_rel); right button: change chroma along the equal-lightness line (locks L).
-- Shift+left changes S only, Alt+left changes V only.
+- Middle button: change lightness along its trajectory, locking the current chroma scale.
+- Right button: change chroma along the equal-lightness line, locking L.
+- Hold the temporary switch key and drag middle / right: same relative dragging, but the chroma locks the other scale.
+- The C strip, value field and clusters follow that scale during the switch and return on release.
+- S-only / V-only actions remain selectable but are no longer bound by default.
 
 ##### Unreachable hues on the ring
 
@@ -419,7 +437,8 @@ The image is a 2× integer enlargement of the real interface, so the row labels 
 - The four horizontal strips have 0 at the left; hold the left button and drag to change that component.
 - Click a value field to edit its text, or type and paste into it; the H / S / V fields can also be adjusted by holding the left button and dragging vertically.
 - Drag multipliers for H / S / V: 1× by default, 2× with `Ctrl`, 4× with `Ctrl+Shift`, 0.5× with `Alt`.
-- The HEX and L / C / a / b fields only accept typing and pasting; they cannot be drag-adjusted.
+- The H / S / V fields share one width and shrink together as the panel narrows, but their text always stays complete (two decimals for H / S / V, the full `#RRGGBB` for HEX): no dynamic decimals and no ellipsis. When a field is too narrow it switches to left alignment and stays at the beginning of the text (the integer part is visible first); it returns to right alignment once the full text fits. Once the fields fit all their digits they stop growing; the extra width goes to the current-color swatch on the right.
+- Click any field to edit the complete value. The HEX and L / C / a / b fields only accept typing and pasting; they cannot be drag-adjusted.
 
 #### Default keys + custom key table
 
@@ -427,17 +446,23 @@ Every area can use the mouse buttons and modifier keys you like, and changes tak
 
 ![Key functions dialog](manual/images/05-keymap.png)
 
-Open **Settings → Key functions...**, then pair the left, middle and right buttons with 8 modifier combinations: None, Shift, Ctrl, Alt, Ctrl+Shift, Shift+Alt, Ctrl+Alt and Ctrl+Shift+Alt. Choose an area, an input and an action, and the change takes effect and is saved immediately.
+Open **Settings → Key functions...**, choose an area, an input (mouse button + 8 modifier combinations) and an action; changes save and apply immediately.
 
 - A duplicate input in the same area is rejected.
-- Restore defaults at the bottom brings back the default table; a saved custom table is never overwritten by an update, so press it once if you want the new defaults.
+- Restore defaults brings back the default table; a saved custom table is never overwritten by an update.
+- A combination that is not configured falls back to the plain (no modifier) row of the same mouse button.
 
-Changes apply to all panels at once, with no Krita restart, and a combination that is not configured separately falls back to the plain (no modifier) row of the same mouse button.
+Change the temporary switch key in **Settings → C strip options → Temporary switch key** (default `Shift`; Ctrl / Alt / combinations / none).
+
+Hold the temporary switch key with the pointer on the panel: preview the other chroma scale immediately (blue through-line, clusters, C strip, C value field).
+Release the key or leave the panel: restore the persistent scale without changing settings.
+Hold the switch key and press a square middle/right or ring left/middle/right button: the base action locks the other scale until release.
+An exact configured input row wins; no auto flip.
 
 | Area | Available inputs | Default keys |
 |---|---|---|
-| Hue ring | 8 modifier combinations, each with left, middle and right button | Left = rotate hue + lock L + lock relative chroma C_rel;<br>middle / right = rotate hue + lock L + lock absolute chroma C;<br>Shift+left = rotate hue only (plain HSV) |
-| SV square | 8 modifier combinations, each with left, middle and right button | Left = absolute positioning;<br>middle = change lightness along its trajectory (locks C_rel);<br>right = change chroma along the equal-lightness line (locks L);<br>Shift+left = S only;<br>Alt+left = V only |
+| Hue ring | 8 modifier combinations, each with left, middle and right button | Left / middle / right = rotate hue + lock L + lock the current chroma scale;<br>Ctrl+left = rotate hue only (plain HSV);<br>temporary switch key + left / middle / right = lock the other chroma scale |
+| SV square | 8 modifier combinations, each with left, middle and right button | Left = the color under the pointer;<br>middle = change lightness (locks the current chroma scale);<br>right = change chroma (locks L);<br>temporary switch key + middle / right = lock the other chroma scale;<br>S-only / V-only actions remain selectable |
 | L / C / a / b strips | 8 modifier combinations, each with left, middle and right button | Left-drag = change that component;<br>on the a and b strips only that component changes, lightness and the other component stay put |
 | Value fields | 8 modifier combinations, each with left, middle and right button | Only the H / S / V fields can be drag-adjusted: left-drag x1;<br>Ctrl+left x2;<br>Ctrl+Shift+left x4;<br>Alt+left x0.5; click to edit the text |
 
@@ -485,19 +510,21 @@ The Settings button at the far left of the value row gathers the panel's display
 
 ![Settings menu with its three submenus](manual/images/09-settings.png)
 
-Click Settings to open the menu, then turn items on or switch between them. The image shows all three submenus expanded: C strip options = Relative chroma C_rel (default) / Absolute chroma C; Lightness standard = Oklab L (perceptual, default) / Grayscale (soft proof); Overlay options = Off / 1 second / 2 seconds / Hover (default) / Always.
+Click Settings to open the menu, then turn items on or switch between them. The image shows all three submenus expanded: C strip options = Relative / Absolute, absolute C clusters, temporary switch key; Lightness standard = Oklab L (perceptual, default) / Grayscale (soft proof); Overlay options = Off / 1 second / 2 seconds / Hover (default) / Always.
 
 Every setting takes effect immediately, and the Docker panel and the popup share the same settings.
 
 | Setting | Effect |
 |---|---|
-| Show lightness/chroma cluster lines | Show two families of guide lines: 9 equal-lightness and 9 equal-relative-chroma lines (on by default) |
-| Show lightness/chroma through-lines | Show the red equal-lightness and blue equal-relative-chroma lines (on by default) |
+| Show lightness/chroma cluster lines | Show equal-lightness lines plus equal-chroma lines: relative C_rel = 0.1-0.9; absolute defaults to the fixed 0.02-0.36 set (18 levels), switchable to 9 levels at 10%-90% of the pure-color C_max(h) |
+| Show lightness/chroma through-lines | Show the red equal-lightness and blue equal-chroma lines; the blue line follows the effective scale (including hover/temporary switch) |
 | Show unreachable hue hint | Add a gray hatch over hues that cannot be reached (on by default) |
 | Show Oklab a/b strips | Show or hide the a and b strips (shown by default) |
 | a/b strips full range | Off (default): the scale follows lightness only, out-of-range spans are hatched and dragging stops at the end; On: every span is reachable, but the scale follows the other component |
-| C strip options | Relative chroma C_rel (default, 0-1) or absolute chroma C |
-| C strip full range | Absolute chroma only: off (default) fixes the range at 0-0.4; on makes it 0 to the maximum chroma at the current lightness and hue |
+| C strip options | Relative chroma C_rel (default, 0-1) or absolute chroma C; in absolute mode the blue through-line, chroma clusters and the square's middle-button lock all switch to absolute C |
+| Even absolute C clusters by hue | Off (default): fixed 0.02-0.36 in 0.02 steps (18 levels; unreachable lightness spans are skipped); on: 9 levels at 10%-90% of the pure-color C_max(h) for the current hue |
+| C strip full range | Absolute chroma only: off (default) fixes the range at 0-0.4; on makes it 0 to the maximum chroma at the current lightness and hue; it affects the strip range only, not the cluster values |
+| Temporary switch key | Hold to preview the other chroma scale; base actions lock the other scale while held. Default `Shift`; Ctrl / Alt / combinations / none |
 | Lightness standard | Oklab L (perceptual, default) or Grayscale (soft proof) |
 | Overlay options | Off / 1 second / 2 seconds / Hover (default) / Always |
 | Key functions... | Open the custom key table |
@@ -646,7 +673,7 @@ Only the dragged component changes; lightness and the other component stay put, 
 
 #### Trajectory lines, clusters and locking
 
-- **Red equal-lightness line:** the path of colors with fixed lightness in S/V and C/H; **blue equal-relative-chroma line:** the line of constant relative chroma.
+- **Red equal-lightness line:** the path of colors with fixed lightness in S/V and C/H; **blue equal-chroma line:** the path of constant chroma, following the effective scale (relative = C_rel, absolute = absolute C; the temporary switch also applies).
 - **Clusters:** two families of dashed lines from 10% to 90%, for visual reference only; they can be turned off in the settings.
 - **Locking:** lock L fixes perceptual lightness, lock C_rel fixes the saturation ratio, lock absolute C fixes the distance from the gray axis; while locked, one trajectory line freezes and the other keeps updating.
 - While dragging the a / b strips, both lines stay live.
