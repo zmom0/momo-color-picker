@@ -237,10 +237,13 @@
 4. Krita 提示需要重启才能启用插件时，选 **Yes**。
 5. 重启 Krita，然后打开 **设置 → 面板列表 → 馍馍拾色器**，或按 `Shift+B`。
 
+**macOS**：下载 `MomoColorPicker-<版本>-macos-arm64-krita5.3.zip`，解压后运行 `./install_macos.sh`。脚本会把插件复制到 `~/Library/Application Support/krita/`，并把内置 numpy 换成与 Krita 内嵌 Python 匹配的 macOS wheel。手动安装则是：`hsv_picker/` 与 `hsv_picker.desktop` 放进 `~/Library/Application Support/krita/pykrita/`，`hsv_picker/actions/hsv_picker.action` 放进 `~/Library/Application Support/krita/actions/`。之后同样到 **设置 → 配置 Krita → Python 插件管理器** 勾选并重启。
+
 ## 兼容性
 
-- **支持**：Krita **5.3.x** + **Windows**（当前实际测试环境）。
-- **其他平台**：不保证可用。想在其它平台使用，需要自行把 numpy 安装到 Krita 使用的 Python 环境；Windows 发布包内置的 numpy 不适用于其它平台。
+- **支持**：Krita **5.3.x** + **Windows**、**macOS（Apple Silicon / arm64）**。
+- macOS 发布包内置 `numpy 2.3.0`（`cp313` / `macosx_11_0_arm64`），与 Krita 5.3.4 内嵌的 Python 3.13 匹配，不需要单独安装 Python 或 numpy。
+- **其他平台**（Linux、Intel Mac）：不保证可用。想在其它平台使用，需要自行把对应平台的 numpy 安装到 Krita 使用的 Python 环境；Windows 发布包内置的 numpy 不适用于其它平台。
 - Windows 发布包内置 numpy 2.3.0，不需要单独安装 Python 或 numpy。
 - Krita 5.2 及更早版本未测试。
 
@@ -600,10 +603,13 @@ Only the dragged component changes; lightness and the other component stay put, 
 4. When Krita says the plugin needs a restart to be enabled, choose **Yes**.
 5. Restart Krita, then open **Settings → Dockers → Momo Color Picker**, or press `Shift+B`.
 
+**macOS:** download `MomoColorPicker-<version>-macos-arm64-krita5.3.zip`, unzip it and run `./install_macos.sh`. The script copies the plugin to `~/Library/Application Support/krita/` and replaces the bundled numpy with the macOS wheel that matches Krita's embedded Python. Manual install: put `hsv_picker/` and `hsv_picker.desktop` into `~/Library/Application Support/krita/pykrita/`, and `hsv_picker/actions/hsv_picker.action` into `~/Library/Application Support/krita/actions/`. Then enable the plugin in **Settings → Configure Krita → Python Plugin Manager** and restart.
+
 ### Compatibility
 
-- **Supported:** Krita **5.3.x** on **Windows** (the environment this build is tested on).
-- **Other platforms:** not guaranteed. To try them, install numpy into the Python environment used by Krita; the numpy bundled in the Windows package does not apply to other platforms.
+- **Supported:** Krita **5.3.x** on **Windows** and **macOS (Apple Silicon / arm64)**.
+- The macOS package bundles `numpy 2.3.0` (`cp313` / `macosx_11_0_arm64`), matching the Python 3.13 embedded in Krita 5.3.4; no separate Python or numpy install is needed.
+- **Other platforms** (Linux, Intel Macs): not guaranteed. Install the numpy build for that platform into the Python environment used by Krita; the numpy bundled in the Windows package does not apply to other platforms.
 - The Windows package bundles numpy 2.3.0, so no separate Python or numpy install is needed.
 - Krita 5.2 and older are untested.
 

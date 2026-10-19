@@ -8,8 +8,9 @@
   · 复制 pykrita/hsv_picker（排除 vendor/__pycache__/*.pyc/*.pyo）；
   · 复制 --vendor（默认 pykrita/hsv_picker/vendor）并只对副本瘦身：
     删 numpy/**/tests 与 numpy/_core/include，保留 numpy-2.3.0.dist-info；
-  · 加入 pykrita/hsv_picker.desktop、install.bat、install.txt；
-  · 输出 <out>/MomoColorPicker-<version>-win64-krita5.3.zip，并打印条目数/大小/顶层结构。
+  · 加入 pykrita/hsv_picker.desktop、install.bat、install.txt、install_macos.sh；
+  · 输出 <out>/MomoColorPicker-<version>-<target>.zip（默认 target = win64-krita5.3），
+    并打印条目数/大小/顶层结构；macOS 发布包用 --target macos-arm64-krita5.3。
 
 本脚本只读仓库源码、只在临时目录和 dist/ 生成产物；不修改开发仓库的 vendor。
 GitHub Actions 复用：先下载并解压 cp313 的 numpy wheel 到 --vendor 指向的目录再调用本脚本。
@@ -29,7 +30,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PKG_REL = Path("pykrita") / "hsv_picker"
 DESKTOP_REL = Path("pykrita") / "hsv_picker.desktop"
-INSTALL_FILES = ("install.bat", "install.txt")
+INSTALL_FILES = ("install.bat", "install.txt", "install_macos.sh")
 SKIP_DIRS = {"__pycache__"}
 SKIP_SUFFIX = (".pyc", ".pyo")
 
@@ -109,6 +110,9 @@ def main(argv=None) -> int:
     ap.add_argument("--vendor", default=str(ROOT / PKG_REL / "vendor"),
                     help="numpy vendor 源目录（默认 pykrita/hsv_picker/vendor）")
     ap.add_argument("--out", default=str(ROOT / "dist"), help="输出目录（默认 dist/）")
+    ap.add_argument("--target", default="win64-krita5.3",
+                    help="发布包目标标识，用于文件名（默认 win64-krita5.3；"
+                         "macOS 用 macos-arm64-krita5.3）")
     args = ap.parse_args(argv)
 
     version = args.version or read_version()
@@ -128,7 +132,7 @@ def main(argv=None) -> int:
             shutil.copy2(ROOT / name, stage / name)
         shutil.copy2(ROOT / DESKTOP_REL, stage / "hsv_picker.desktop")
 
-        zip_path = out_dir / ("MomoColorPicker-%s-win64-krita5.3.zip" % version)
+        zip_path = out_dir / ("MomoColorPicker-%s-%s.zip" % (version, args.target))
         dirs = sorted(p for p in stage.rglob("*") if p.is_dir())
         files = sorted(p for p in stage.rglob("*") if p.is_file())
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
@@ -165,8 +169,9 @@ def main(argv=None) -> int:
         if bad:
             print("!! 不应出现的条目：%r" % bad[:5])
             return 1
-        if set(top) != {"hsv_picker", "hsv_picker.desktop", "install.bat", "install.txt"}:
-            print("!! 顶层结构不符合预期：%s" % sorted(top))
+        expected_top = {"hsv_picker", "hsv_picker.desktop"} | set(INSTALL_FILES)
+        if set(top) != expected_top:
+            print("!! 顶层结构不符合预期：%s（期望 %s）" % (sorted(top), sorted(expected_top)))
             return 1
     finally:
         shutil.rmtree(stage, ignore_errors=True)
