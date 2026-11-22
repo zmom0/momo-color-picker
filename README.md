@@ -240,6 +240,7 @@
 ## 兼容性
 
 - **支持**：Krita **5.3.x** + **Windows**（当前实际测试环境）。
+- **macOS**：社区维护的 macOS 版（非官方）：<https://github.com/Zenobins/momo-color-picker-macos>，发布包内置 macOS 版 numpy 并提供安装脚本。
 - **其他平台**：不保证可用。想在其它平台使用，需要自行把 numpy 安装到 Krita 使用的 Python 环境；Windows 发布包内置的 numpy 不适用于其它平台。
 - Windows 发布包内置 numpy 2.3.0，不需要单独安装 Python 或 numpy。
 - Krita 5.2 及更早版本未测试。
@@ -603,6 +604,7 @@ Only the dragged component changes; lightness and the other component stay put, 
 ### Compatibility
 
 - **Supported:** Krita **5.3.x** on **Windows** (the environment this build is tested on).
+- **macOS:** community-maintained build: <https://github.com/Zenobins/momo-color-picker-macos> (bundled macOS numpy and an install script).
 - **Other platforms:** not guaranteed. To try them, install numpy into the Python environment used by Krita; the numpy bundled in the Windows package does not apply to other platforms.
 - The Windows package bundles numpy 2.3.0, so no separate Python or numpy install is needed.
 - Krita 5.2 and older are untested.
